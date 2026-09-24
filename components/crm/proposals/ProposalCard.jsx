@@ -1,11 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, Clock, Copy, Check, ImageDown, Mic, Pencil, Sparkles, Trash2, UserCheck, X, Phone, MessageCircle, MessageSquare } from "lucide-react";
+import { AlertTriangle, ChevronDown, Clock, Copy, Check, ImageDown, Mic, Pencil, Sparkles, Trash2, UserCheck, X, Phone, MessageCircle, MessageSquare,
+  Lock,
+} from "lucide-react";
 import { useCrmStore, PROPOSAL_STAGES, PROPOSAL_DROPPED } from "@/lib/crm/store";
 import { useMediaUrl } from "@/lib/crm/useMediaUrl";
 import { buildProfileShareText } from "@/lib/crm/shareText";
 import ConfirmDialog from "@/components/crm/ui/ConfirmDialog";
+import { externalShareText } from "@/lib/crm/externalShareText";
+import { releaseAssignmentMode } from "@/lib/crm/assignment";
 import StageFunnel from "./StageFunnel";
 import CandidatePhone from "@/components/crm/profiles/CandidatePhone";
 import { downloadMedia } from "@/lib/crm/mediaStore";
@@ -73,13 +77,9 @@ function ExternalContactCard({ data, proposalId, side }) {
   };
 
   const handleCopy = async () => {
-    const text = [
-      `${data.name} (מהמעגל האישי - לא במאגר)`,
-      data.phone ? `טלפון לבירורים: ${data.phone}` : null,
-      data.notes || null,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    // הסימון "(מהמעגל האישי - לא במאגר)" הוא פנימי למסך בלבד ואינו נכנס
+    // לטקסט המועתק. ראו lib/crm/externalShareText.js
+    const text = externalShareText(data);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -311,6 +311,7 @@ export default function ProposalCard({ proposal }) {
   const updateProposalStatus = useCrmStore((s) => s.updateProposalStatus);
   const updateProposalRationale = useCrmStore((s) => s.updateProposalRationale);
   const assignProposal = useCrmStore((s) => s.assignProposal);
+  const currentUser = useCrmStore((s) => s.currentUser);
   const assignProposalToSelf = useCrmStore((s) => s.assignProposalToSelf);
   const deleteProposal = useCrmStore((s) => s.deleteProposal);
   const showToast = useCrmStore((s) => s.showToast);
@@ -319,6 +320,24 @@ export default function ProposalCard({ proposal }) {
   const [note, setNote] = useState("");
   const [rationaleDraft, setRationaleDraft] = useState(proposal.rationale || "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingRelease, setConfirmingRelease] = useState(false);
+
+  // שחרור שיוך - רק בעל/ת התיק, ומנהלת אחרי אישור מפורש.
+  // ראו lib/crm/assignment.js
+  const releaseMode = releaseAssignmentMode(proposal, currentUser(), role);
+  const handleRelease = () => {
+    if (releaseMode === "admin") {
+      setConfirmingRelease(true);
+      return;
+    }
+    assignProposal(proposal.id, null, null);
+    showToast("השיוך שוחרר. ההצעה חזרה להיות פנויה לכל הצוות");
+  };
+  const releaseByAdmin = async () => {
+    await assignProposal(proposal.id, null, null);
+    setConfirmingRelease(false);
+    showToast("השיוך שוחרר בסמכות מנהלת");
+  };
   const [proposalCopied, setProposalCopied] = useState(false);
   const [stageBusy, setStageBusy] = useState("");
   const rationaleRef = useRef(null);
@@ -449,12 +468,23 @@ export default function ProposalCard({ proposal }) {
           <span className="text-[11px] font-semibold text-[#A2937F]">טרם שויך לאיש צוות</span>
         )}
         {proposal.assignee ? (
-          <button
-            onClick={() => assignProposal(proposal.id, null)}
-            className="flex items-center gap-1 text-[11px] font-semibold text-[#A2937F] hover:text-[#844442]"
-          >
-            <X size={12} /> שחרור שיוך
-          </button>
+          releaseMode === "blocked" ? (
+            // התיק של מישהי אחרת. החיווי נשאר גלוי כדי שיהיה ברור שהאפשרות
+            // קיימת, אבל נעול - ומסביר במגע אחד למה.
+            <span
+              title={`התיק משויך ל${proposal.assignee}. רק מי שהתיק שלה יכולה לשחרר אותו.`}
+              className="flex cursor-not-allowed items-center gap-1 text-[11px] font-semibold text-[#CFC3B4]"
+            >
+              <Lock size={12} /> שחרור שיוך
+            </span>
+          ) : (
+            <button
+              onClick={handleRelease}
+              className="flex items-center gap-1 text-[11px] font-semibold text-[#A2937F] hover:text-[#844442]"
+            >
+              <X size={12} /> שחרור שיוך
+            </button>
+          )
         ) : (
           <button
             onClick={() => assignProposalToSelf(proposal.id)}
@@ -575,6 +605,16 @@ export default function ProposalCard({ proposal }) {
             </ul>
           </div>
         </div>
+      )}
+
+      {confirmingRelease && (
+        <ConfirmDialog
+          message={`התיק הזה משויך ל${proposal.assignee}. לשחרר את השיוך בכל זאת? ההצעה תחזור להיות פנויה לכל הצוות.`}
+          confirmLabel="לשחרר את השיוך"
+          tone="neutral"
+          onConfirm={releaseByAdmin}
+          onCancel={() => setConfirmingRelease(false)}
+        />
       )}
 
       {confirmingDelete && (
