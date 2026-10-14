@@ -61,11 +61,31 @@ export default function ProposalsPage() {
 
   useEffect(() => {
     const { male, female } = selection;
-    // הבחירה התנקתה (למשל מיד אחרי ההקמה) - משאירים את ההתראה על המסך
+
+    // ההתראה שייכת לזוג מסוים אחד, ולכן היא יורדת מהמסך ברגע שצד שנבחר
+    // עכשיו סותר את הזוג שהיא מתארת.
+    //
+    // בלי הבדיקה הזו התראה של זוג קודם נשארה על המסך בזמן שמרכיבים זוג
+    // חדש לגמרי, והציגה תאריך של הצעה שאין לה שום קשר לשני האנשים
+    // שנבחרו - אזעקת שווא.
+    //
+    // בחירה ריקה אינה סתירה. זה בדיוק המצב שמיד אחרי ההקמה, ושם ההתראה
+    // חייבת להישאר עד שסוגרים אותה ידנית או מתחילים זוג אחר.
+    setDuplicateNotice((prev) => {
+      if (!prev) return prev;
+      const contradicts = (side, belongsTo) => !!side && side !== belongsTo;
+      return contradicts(male, prev.male) || contradicts(female, prev.female) ? null : prev;
+    });
+
     if (!male || !female || male === EXTERNAL || female === EXTERNAL) return;
 
     const pairKey = `${male}|${female}`;
-    if (pairKey === dismissedPair) return;
+    // הזוג הזה נסגר ידנית - לא מציגים עליו התראה, וגם לא משאירים התראה
+    // קודמת תלויה על המסך.
+    if (pairKey === dismissedPair) {
+      setDuplicateNotice(null);
+      return;
+    }
 
     const past = pastProposalsForPair(proposals, male, female);
     if (past.length === 0) {
@@ -75,6 +95,10 @@ export default function ProposalsPage() {
     const dropped = past.filter((x) => x.status === PROPOSAL_DROPPED);
     setDuplicateNotice({
       pairKey,
+      // שני הצדדים נשמרים בנפרד, כדי שאפשר יהיה להצליב כל צד לחוד מול
+      // הבחירה הנוכחית ולא רק את המפתח המחובר.
+      male,
+      female,
       isDropped: dropped.length > 0,
       dateMs: toMillis((dropped[0] || past[0]).createdAt),
       rationale: dropped.length > 0 ? lastDropInfo(dropped[0], PROPOSAL_DROPPED)?.rationale || "" : "",
@@ -120,6 +144,14 @@ export default function ProposalsPage() {
   const archivedProposals = proposals.filter(
     (p) => !isOnActiveBoard(p, PROPOSAL_DROPPED) && p.status !== PROPOSAL_FROZEN
   );
+
+  // חגורת ביטחון שנייה להתראת הכפילות: גם אם משהו ישתנה בעתיד בלוגיקה
+  // שלמעלה, ההתראה לעולם לא תוצג לצד זוג שסותר אותה. בחירה ריקה אינה
+  // סתירה, ולכן ההתראה שורדת את ניקוי הבחירה שאחרי ההקמה.
+  const noticeMatchesSelection =
+    !!duplicateNotice &&
+    (!selection.male || selection.male === duplicateNotice.male) &&
+    (!selection.female || selection.female === duplicateNotice.female);
 
   // התראת כפילות: נבדקת מול כל ההיסטוריה, כולל הצעות שכבר אינן מוצגות
   const pastForSelection =
@@ -212,7 +244,7 @@ export default function ProposalsPage() {
       {/* התראת כפילות - נשענת על ההיסטוריה המלאה במסד הנתונים, גם על הצעות
           שכבר ירדו מהתצוגה. זו הסיבה שהצעות שירדו מהפרק לעולם אינן נמחקות.
           ההתראה נשארת על המסך עד סגירה ידנית, גם אחרי שההצעה הוקמה. */}
-      {duplicateNotice && (
+      {duplicateNotice && noticeMatchesSelection && (
         <div className="mt-3 flex items-start gap-2 rounded-2xl border-2 border-[#D9A441] bg-[#FDF6E7] px-3.5 py-3">
           <AlertTriangle size={17} className="mt-0.5 shrink-0 text-[#7A5A18]" />
           <div className="min-w-0 flex-1 text-[12px] leading-relaxed text-[#7A5A18]">
