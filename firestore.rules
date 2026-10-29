@@ -126,6 +126,38 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ---------------------------------------------------------------
+    //  "ערב משדכים" - דף נחיתה עצמאי בנתיב /adama-event.
+    //  הדף פתוח בלי התחברות, ולכן הכתיבה מותרת לאורח - בדיוק באותו
+    //  דגם של טופס ההרשמה: יוצרים בלבד, ואיש אינו קורא חוץ מהצוות.
+    //  שני האוספים האלה אינם נוגעים במאגר המועמדים בשום צורה.
+    // ---------------------------------------------------------------
+
+    match /event_rsvps/{id} {
+      allow create: if request.resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('name', '') is string
+        && request.resource.data.name.size() > 1
+        && request.resource.data.name.size() < 120
+        && request.resource.data.get('phone', '') is string
+        && request.resource.data.phone.size() > 5
+        && request.resource.data.phone.size() < 40;
+      allow get, list: if isStaff();
+      allow update, delete: if isAdmin();
+    }
+
+    match /event_leads/{id} {
+      allow create: if request.resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('name', '') is string
+        && request.resource.data.name.size() > 1
+        && request.resource.data.name.size() < 120
+        && request.resource.data.get('phone', '') is string
+        && request.resource.data.phone.size() < 40
+        && request.resource.data.get('note', '') is string
+        && request.resource.data.get('note', '').size() < 400;
+      allow get, list: if isStaff();
+      allow update, delete: if isAdmin();
+    }
+
     match /telemetry/{staffEmail} {
       allow read: if isStaff();
       allow write: if isStaff() && myEmail() == staffEmail;
