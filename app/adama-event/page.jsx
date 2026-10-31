@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Check, Printer, Users, Sparkles, Clock, Video, CalendarDays, Loader2 } from "lucide-react";
+import {
+  ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
+} from "lucide-react";
 import { EVENT, saveRsvp, saveLeads, PITCH_GUIDE } from "@/lib/crm/eventStore";
 
 // ============================================================================
@@ -11,7 +13,12 @@ import { EVENT, saveRsvp, saveLeads, PITCH_GUIDE } from "@/lib/crm/eventStore";
 //  אינה מייבאת דבר מהמערכת חוץ משכבת הנתונים הייעודית שלה, ולכן אינה
 //  יכולה לשבור שום מסך קיים.
 //
-//  שלושה שלבים: הרשמה -> שלושה מועמדים -> מסך סיום עם דף הכנה להדפסה.
+//  שלבי הזרימה:
+//   1. הרשמה לערב      -> נשמרת באוסף event_rsvps.
+//   2. דף הכנה אישי    -> נשאר במחשב של המשתמש בלבד (Client-side),
+//                          משמש רק ליצירת דף ההדפסה ואינו נשמר בשום מסד נתונים.
+//   3. המלצת חברים     -> רק לאחר ההדפסה. כל חבר נשמר כמסמך נפרד
+//                          באוסף event_leads, עם שדה referred_by.
 // ============================================================================
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -24,10 +31,19 @@ export default function AdamaEventPage() {
   const [leaving, setLeaving] = useState(false);
   const [me, setMe] = useState({ name: "", phone: "" });
   const [rsvpId, setRsvpId] = useState(null);
-  const [rows, setRows] = useState([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [savedCount, setSavedCount] = useState(0);
+
+  // שלב 2 — הכנה אישית בלבד. נשאר בזיכרון הדפדפן ולא נשמר בשום מקום.
+  const [rows, setRows] = useState([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+
+  // שלב 3 — המלצת חברים למאגר. נפתח רק אחרי ההדפסה.
+  const [printed, setPrinted] = useState(false);
+  const [friends, setFriends] = useState([{ ...EMPTY_ROW }]);
+  const [refBusy, setRefBusy] = useState(false);
+  const [refErr, setRefErr] = useState("");
+  const [refSaved, setRefSaved] = useState(0);
+  const [refDone, setRefDone] = useState(false);
 
   // מעבר בין שלבים עם דעיכה קצרה, כדי שהחלפת המסך תרגיש רציפה
   const goTo = (next) => {
@@ -56,20 +72,43 @@ export default function AdamaEventPage() {
 
   const filled = rows.filter((r) => r.name.trim().length >= 2).length;
 
-  const submitLeads = async () => {
+  // שלב 2 אינו שומר שום דבר. הנתונים נשארים בזיכרון הדפדפן ומשמשים
+  // אך ורק להרכבת דף ההדפסה האישי של המשתמש.
+  const continueToPrep = () => {
     setErr("");
-    setBusy(true);
-    try {
-      setSavedCount(await saveLeads(rsvpId, rows, me));
-      goTo("done");
-    } catch {
-      setErr("השמירה לא הצליחה. אפשר לנסות שוב.");
-    } finally {
-      setBusy(false);
-    }
+    goTo("done");
   };
 
   const setRow = (i, patch) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  // ההדפסה היא מה שפותח את שלב 3
+  const handlePrint = () => {
+    setPrinted(true);
+    setTimeout(() => window.print(), 80);
+  };
+
+  /* ---------- שלב 3: המלצת חברים למאגר אדמה ---------- */
+
+  const setFriend = (i, patch) => setFriends((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const addFriend = () => setFriends((fs) => [...fs, { ...EMPTY_ROW }]);
+  const friendsFilled = friends.filter((f) => f.name.trim().length >= 2).length;
+
+  const submitFriends = async () => {
+    setRefErr("");
+    if (friendsFilled === 0) return setRefErr("צריך לפחות שם אחד");
+    setRefBusy(true);
+    try {
+      // saveLeads יוצר מסמך נפרד לכל חבר באוסף event_leads, עם referred_by
+      const n = await saveLeads(rsvpId, friends, me);
+      setRefSaved(n);
+      setRefDone(true);
+      setFriends([{ ...EMPTY_ROW }]);
+    } catch {
+      setRefErr("השליחה לא הצליחה. אפשר לנסות שוב בעוד רגע.");
+    } finally {
+      setRefBusy(false);
+    }
+  };
 
   return (
     <div dir="rtl" className="ev-root min-h-screen bg-[#F5EFE6]">
@@ -110,7 +149,8 @@ export default function AdamaEventPage() {
                 <Eyebrow icon={Sparkles}>שלב שני</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה לערב?</h2>
                 <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                  שלושה מועמדים שתרצה/י להציג. נגיע מוכנים, ותקבל/י בסוף דף הכנה מודפס עם השמות האלה כבר בפנים.
+                  שלושה מועמדים שתרצה/י להציג. השמות האלה נשארים אצלך בלבד — הם משמשים רק
+                  להרכבת דף ההכנה להדפסה, ואינם נשמרים אצלנו בשום מקום.
                 </p>
 
                 <div className="mt-6 space-y-5">
@@ -138,8 +178,8 @@ export default function AdamaEventPage() {
 
                 {err && <ErrorLine>{err}</ErrorLine>}
 
-                <PrimaryButton onClick={submitLeads} busy={busy} disabled={filled === 0}>
-                  {filled === 0 ? "הזינו לפחות מועמד/ת אחד/ת" : `שמירה והמשך (${filled})`}
+                <PrimaryButton onClick={continueToPrep} busy={busy} disabled={filled === 0}>
+                  {filled === 0 ? "הזינו לפחות מועמד/ת אחד/ת" : `המשך לדף ההכנה (${filled})`}
                   {filled > 0 && <ArrowLeft size={17} />}
                 </PrimaryButton>
 
@@ -153,48 +193,138 @@ export default function AdamaEventPage() {
             )}
 
             {step === "done" && (
-              <Card>
-                <div className="flex flex-col items-center text-center">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#DDE6DF]">
-                    <Check size={26} className="text-[#4A6552]" strokeWidth={2.4} />
-                  </span>
-                  <h2 className="mt-4 text-[26px] font-bold text-[#3A2E26]">נרשמת. נתראה בערב.</h2>
-                  <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                    {savedCount > 0
-                      ? `${savedCount} מועמדים נשמרו ומחכים לך בדף ההכנה.`
-                      : "אפשר להוסיף מועמדים גם בערב עצמו."}
-                  </p>
-                </div>
+              <>
+                <Card>
+                  <div className="flex flex-col items-center text-center">
+                    <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#DDE6DF]">
+                      <Check size={26} className="text-[#4A6552]" strokeWidth={2.4} />
+                    </span>
+                    <h2 className="mt-4 text-[26px] font-bold text-[#3A2E26]">נרשמת. נתראה בערב.</h2>
+                    <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
+                      {filled > 0
+                        ? `דף ההכנה שלך מוכן, עם ${filled} המועמדים שהזנת בפנים.`
+                        : "דף ההכנה שלך מוכן להדפסה."}
+                    </p>
+                  </div>
 
-                <div className="mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5">
-                  <Eyebrow icon={Video}>הכניסה לערב</Eyebrow>
-                  {EVENT.zoomUrl ? (
+                  <div className="mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5">
+                    <Eyebrow icon={Video}>הכניסה לערב</Eyebrow>
+                    <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
+                      הערב מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
+                    </p>
                     <a
                       href={EVENT.zoomUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white transition active:scale-95"
+                      className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
                     >
                       <Video size={17} /> כניסה לזום
                     </a>
-                  ) : (
-                    <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
-                      קישור הזום יישלח אלייך בוואטסאפ למספר שהשארת, לקראת הערב.
-                    </p>
-                  )}
-                </div>
+                  </div>
 
-                <button
-                  onClick={() => window.print()}
-                  className="group mt-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[#844442] py-4 text-[16px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(132,68,66,0.75)] transition hover:bg-[#5E2F2D] active:scale-[0.98]"
-                >
-                  <Printer size={19} className="transition-transform group-hover:-translate-y-0.5" />
-                  הדפיסו את דף העבודה שלכם
-                </button>
-                <p className="mt-2 text-center text-[12px] text-[#A2937F]">
-                  דף A4 אחד · המדריך והמועמדים שלך, מוכן לשולחן
-                </p>
-              </Card>
+                  <button
+                    onClick={handlePrint}
+                    className="group mt-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[#844442] py-4 text-[16px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(132,68,66,0.75)] transition hover:bg-[#5E2F2D] active:scale-[0.98]"
+                  >
+                    <Printer size={19} className="transition-transform group-hover:-translate-y-0.5" />
+                    הדפיסו את דף העבודה שלכם
+                  </button>
+                  <p className="mt-2 text-center text-[12px] text-[#A2937F]">
+                    דף A4 אחד · המדריך והמועמדים שלך, מוכן לשולחן
+                  </p>
+
+                  {!printed && (
+                    <button
+                      onClick={() => setPrinted(true)}
+                      className="mt-3 w-full rounded-2xl py-2.5 text-[13px] font-semibold text-[#7C6E60] transition hover:text-[#844442]"
+                    >
+                      אדפיס אחר כך
+                    </button>
+                  )}
+                </Card>
+
+                {/* ---------- שלב 3: נפתח רק אחרי ההדפסה ---------- */}
+                {printed && !refDone && (
+                  <Panel>
+                    <Eyebrow icon={UserPlus}>שלב שלישי</Eyebrow>
+                    <h2 className="mt-2 text-[24px] font-bold leading-tight text-[#3A2E26]">
+                      רוצים להוסיף חברים למאגר אדמה?
+                    </h2>
+                    <p className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-[#EFF4EF] px-3 py-1 text-[12px] font-bold text-[#4A6552]">
+                      <Heart size={13} strokeWidth={2.4} /> ללא עלות
+                    </p>
+                    <p className="mt-3 text-[15px] leading-relaxed text-[#7C6E60]">
+                      כל שם שתוסיפו נכנס למאגר ואנחנו ממשיכים מכאן. אפשר להוסיף כמה שרוצים —
+                      לוחצים על הפלוס ומקבלים כרטיס נוסף.
+                    </p>
+
+                    <div className="mt-6 space-y-5">
+                      {friends.map((f, i) => (
+                        <div key={i} className="rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-4">
+                          <div className="mb-3 flex items-center gap-2">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#844442] text-[13px] font-bold text-white">
+                              {i + 1}
+                            </span>
+                            <span className="text-[13px] font-semibold text-[#7C6E60]">חבר/ה {i + 1}</span>
+                          </div>
+                          <div className="space-y-2.5">
+                            <Field label="שם" value={f.name} onChange={(v) => setFriend(i, { name: v })} placeholder="שם מלא" compact />
+                            <Field label="טלפון" value={f.phone} onChange={(v) => setFriend(i, { phone: v })} placeholder="050-0000000" type="tel" dir="ltr" compact />
+                            <Field
+                              label="כמה מילים עליו/עליה"
+                              value={f.note}
+                              onChange={(v) => setFriend(i, { note: v })}
+                              placeholder="מי זה בשתי שורות"
+                              compact
+                              area
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={addFriend}
+                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[#D9CBB8] py-3.5 text-[14px] font-bold text-[#844442] transition hover:border-[#844442] hover:bg-[#FBF7F1] active:scale-[0.99]"
+                    >
+                      <Plus size={18} strokeWidth={2.6} /> הוספת חבר/ה נוסף/ת
+                    </button>
+
+                    {refErr && <ErrorLine>{refErr}</ErrorLine>}
+
+                    <PrimaryButton onClick={submitFriends} busy={refBusy} disabled={friendsFilled === 0}>
+                      {friendsFilled === 0 ? "הזינו לפחות שם אחד" : `שליחה למאגר (${friendsFilled})`}
+                      {friendsFilled > 0 && <ArrowLeft size={17} />}
+                    </PrimaryButton>
+                  </Panel>
+                )}
+
+                {refDone && (
+                  <Panel>
+                    <div className="flex flex-col items-center text-center">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F4EADF]">
+                        <Heart size={22} className="text-[#844442]" strokeWidth={2.4} />
+                      </span>
+                      <h2 className="mt-3 text-[22px] font-bold text-[#3A2E26]">
+                        {refSaved === 1 ? "חבר/ה אחד/ת נוסף/ה למאגר. תודה!" : `${refSaved} חברים נוספו למאגר. תודה!`}
+                      </h2>
+                      <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
+                        אנחנו ממשיכים מכאן. אם עולים לך עוד שמות — אפשר להוסיף גם עכשיו.
+                      </p>
+                      <button
+                        onClick={() => {
+                          setRefDone(false);
+                          setRefErr("");
+                          setFriends([{ ...EMPTY_ROW }]);
+                        }}
+                        className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-[#D9CBB8] px-5 py-3 text-[14px] font-bold text-[#844442] transition hover:bg-[#FBF7F1] active:scale-[0.98]"
+                      >
+                        <Plus size={17} strokeWidth={2.6} /> להוסיף עוד חברים
+                      </button>
+                    </div>
+                  </Panel>
+                )}
+              </>
             )}
           </div>
         </main>
@@ -245,6 +375,15 @@ function Pill({ icon: Icon, children }) {
 function Card({ children }) {
   return (
     <section className="-mt-8 rounded-[30px] border border-[#E2D5C4] bg-white p-6 shadow-[0_20px_50px_-24px_rgba(58,46,38,0.35)]">
+      {children}
+    </section>
+  );
+}
+
+// כרטיס המשך — זהה ל-Card אבל ממוקם מתחת לכרטיס שלפניו ולא נצמד לכותרת
+function Panel({ children }) {
+  return (
+    <section className="mt-5 rounded-[30px] border border-[#E2D5C4] bg-white p-6 shadow-[0_20px_50px_-24px_rgba(58,46,38,0.35)]">
       {children}
     </section>
   );
