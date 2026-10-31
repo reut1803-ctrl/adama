@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
 } from "lucide-react";
@@ -26,6 +26,10 @@ const img = (n) => `${BASE}/assets/event/${n}`;
 
 const EMPTY_ROW = { name: "", phone: "", note: "" };
 
+// זיכרון מקומי בדפדפן של המשתמש בלבד. נשמר רק במכשיר שלו, לא אצלנו
+// ולא במסד הנתונים, ומפתח נפרד לכל אירוע כדי שאירוע חדש יתחיל מאפס.
+const STORAGE_KEY = `adama-event:${EVENT.id}`;
+
 export default function AdamaEventPage() {
   const [step, setStep] = useState("rsvp"); // rsvp | leads | done
   const [leaving, setLeaving] = useState(false);
@@ -44,6 +48,63 @@ export default function AdamaEventPage() {
   const [refErr, setRefErr] = useState("");
   const [refSaved, setRefSaved] = useState(0);
   const [refDone, setRefDone] = useState(false);
+
+  // ready נדלק אחרי ניסיון השחזור, כדי שלא נדרוס את מה ששמור
+  // בכתיבה הראשונה, ושלא יהבהב מסך שלב 1 למי שכבר נרשם.
+  const [ready, setReady] = useState(false);
+
+  // שחזור: מי שרענן, סגר וחזר, או נכנס שוב מהקישור - נוחת בדיוק
+  // במסך שבו היה, בלי להקליד שום דבר מחדש.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        if (saved.step === "leads" || saved.step === "done") setStep(saved.step);
+        if (saved.me) setMe({ name: saved.me.name || "", phone: saved.me.phone || "" });
+        if (saved.rsvpId) setRsvpId(saved.rsvpId);
+        if (Array.isArray(saved.rows) && saved.rows.length) {
+          setRows(saved.rows.map((r) => ({ name: r?.name || "", phone: r?.phone || "", note: r?.note || "" })));
+        }
+        if (saved.printed) setPrinted(true);
+        if (saved.refDone) {
+          setRefDone(true);
+          setRefSaved(Number(saved.refSaved) || 0);
+        }
+      }
+    } catch {
+      // גלישה פרטית או חסימת אחסון - פשוט מתחילים רגיל
+    }
+    setReady(true);
+  }, []);
+
+  // שמירה שוטפת. try/catch כי בגלישה פרטית הכתיבה עלולה להיכשל,
+  // ואסור שזה יפיל את הדף.
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ step, me, rsvpId, rows, printed, refDone, refSaved })
+      );
+    } catch {}
+  }, [ready, step, me, rsvpId, rows, printed, refDone, refSaved]);
+
+  // התחלה נקייה, למי שרוצה לרשום מישהו אחר מאותו מכשיר
+  const startOver = () => {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+    setMe({ name: "", phone: "" });
+    setRsvpId(null);
+    setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+    setPrinted(false);
+    setFriends([{ ...EMPTY_ROW }]);
+    setRefDone(false);
+    setRefSaved(0);
+    setRefErr("");
+    setErr("");
+    goTo("rsvp");
+  };
 
   // מעבר בין שלבים עם דעיכה קצרה, כדי שהחלפת המסך תרגיש רציפה
   const goTo = (next) => {
@@ -123,7 +184,7 @@ export default function AdamaEventPage() {
             className="transition-all duration-300"
             style={{ opacity: leaving ? 0 : 1, transform: leaving ? "translateY(14px)" : "none" }}
           >
-            {step === "rsvp" && (
+            {ready && step === "rsvp" && (
               <Card>
                 <Eyebrow icon={CalendarDays}>שריון מקום</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">אני מגיע/ה</h2>
@@ -144,7 +205,7 @@ export default function AdamaEventPage() {
               </Card>
             )}
 
-            {step === "leads" && (
+            {ready && step === "leads" && (
               <Card>
                 <Eyebrow icon={Sparkles}>שלב שני</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה לערב?</h2>
@@ -192,7 +253,7 @@ export default function AdamaEventPage() {
               </Card>
             )}
 
-            {step === "done" && (
+            {ready && step === "done" && (
               <>
                 <Card>
                   <div className="flex flex-col items-center text-center">
@@ -241,6 +302,13 @@ export default function AdamaEventPage() {
                       אדפיס אחר כך
                     </button>
                   )}
+
+                  <button
+                    onClick={startOver}
+                    className="mt-4 w-full py-1 text-[12px] text-[#BCAC97] underline underline-offset-2 transition hover:text-[#844442]"
+                  >
+                    לרשום מישהו אחר מהמכשיר הזה
+                  </button>
                 </Card>
 
                 {/* ---------- שלב 3: נפתח רק אחרי ההדפסה ---------- */}
