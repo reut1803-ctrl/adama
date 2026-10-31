@@ -344,17 +344,25 @@ function Hero() {
       <div className="absolute inset-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={img("shepherd.jpg")} alt="" aria-hidden="true" className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#3A2E26]/75 via-[#3A2E26]/55 to-[#F5EFE6]" />
+        {/* מעבר רך: כהה רק בראש, בשביל קריאוּת הכותרת, מתבהר על הרועה
+            והכבשים, ונמס אל צבע הרקע של הדף בתחתית */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(to bottom, rgba(58,46,38,0.74) 0%, rgba(58,46,38,0.46) 24%, rgba(58,46,38,0.16) 50%, rgba(58,46,38,0.04) 64%, rgba(245,239,230,0.32) 78%, rgba(245,239,230,0.86) 92%, #F5EFE6 100%)",
+          }}
+        />
       </div>
 
-      <div className="relative mx-auto w-full max-w-xl px-5 pb-14 pt-16 text-center">
+      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-14 text-center">
         <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
         <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">ערב משדכים</h1>
         <p className="mx-auto mt-3 max-w-sm text-[16px] leading-relaxed text-white/85">
           ערב אחד, חדר אחד, וכל השמות שאנחנו נושאים בלב. באים מוכנים — ויוצאים עם התאמות.
         </p>
 
-        <div className="mx-auto mt-7 flex max-w-sm flex-wrap items-center justify-center gap-2">
+        <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
           <Pill icon={CalendarDays}>{EVENT.dateLabel} · {EVENT.dateShort}</Pill>
           <Pill icon={Clock}>{EVENT.time}</Pill>
           <Pill icon={Video}>{EVENT.place}</Pill>
@@ -374,7 +382,7 @@ function Pill({ icon: Icon, children }) {
 
 function Card({ children }) {
   return (
-    <section className="-mt-8 rounded-[30px] border border-[#E2D5C4] bg-white p-6 shadow-[0_20px_50px_-24px_rgba(58,46,38,0.35)]">
+    <section className="mt-5 rounded-[30px] border border-[#E2D5C4] bg-white p-6 shadow-[0_20px_50px_-24px_rgba(58,46,38,0.35)]">
       {children}
     </section>
   );
