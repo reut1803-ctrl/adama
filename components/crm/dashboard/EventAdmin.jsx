@@ -27,6 +27,7 @@ export default function EventAdmin() {
   const [copied, setCopied] = useState(false);
   const [ev, setEv] = useState(EVENT);
   const [reload, setReload] = useState(0);
+  const [onlyCurrent, setOnlyCurrent] = useState(true);
 
   // פרטי האירוע הנוכחיים, כפי שהם מוצגים בדף הנחיתה
   useEffect(() => {
@@ -66,6 +67,13 @@ export default function EventAdmin() {
       showToast("ההעתקה נכשלה");
     }
   };
+
+  // רשומות מאירועים קודמים נשמרות במאגר ואינן נמחקות לעולם,
+  // אבל כברירת מחדל מוצג רק האירוע הפעיל כדי שהמסך יישאר נקי.
+  const ofCurrent = (r) => (r.eventId || EVENT.id) === ev.id;
+  const shownRsvps = onlyCurrent ? rsvps.filter(ofCurrent) : rsvps;
+  const shownLeads = onlyCurrent ? leads.filter(ofCurrent) : leads;
+  const hidden = rsvps.length - shownRsvps.length + (leads.length - shownLeads.length);
 
   const fmt = (iso) => {
     try { return new Date(iso).toLocaleDateString("he-IL"); } catch { return ""; }
@@ -114,8 +122,8 @@ export default function EventAdmin() {
 
       <div className="mt-3 flex rounded-2xl border border-[#CCBDAB] bg-[#F5EFE6] p-1">
         {[
-          ["rsvps", "נרשמו לערב", rsvps.length, Users],
-          ["leads", "לידים חדשים", leads.length, Sparkles],
+          ["rsvps", "נרשמו לערב", shownRsvps.length, Users],
+          ["leads", "לידים חדשים", shownLeads.length, Sparkles],
         ].map(([id, label, n, Icon]) => (
           <button
             key={id}
@@ -130,21 +138,38 @@ export default function EventAdmin() {
         ))}
       </div>
 
+      {hidden > 0 && (
+        <button
+          onClick={() => setOnlyCurrent(false)}
+          className="mt-2 w-full rounded-xl bg-[#F5EFE6] px-3 py-2 text-[11.5px] font-semibold text-[#7C6E60] transition active:scale-[0.99]"
+        >
+          {hidden} רשומות מאירועים קודמים מוסתרות · להצגת הכול
+        </button>
+      )}
+      {!onlyCurrent && (
+        <button
+          onClick={() => setOnlyCurrent(true)}
+          className="mt-2 w-full rounded-xl bg-[#F5EFE6] px-3 py-2 text-[11.5px] font-semibold text-[#7C6E60] transition active:scale-[0.99]"
+        >
+          מוצגים כל האירועים · חזרה לאירוע הנוכחי בלבד
+        </button>
+      )}
+
       <div className="mt-3 space-y-2">
         {tab === "rsvps" &&
-          (rsvps.length === 0 ? (
+          (shownRsvps.length === 0 ? (
             <Empty>עדיין אין נרשמים. שתפי את הקישור כדי להתחיל.</Empty>
           ) : (
-            rsvps.map((r) => (
+            shownRsvps.map((r) => (
               <Row key={r.id} title={r.name} meta={fmt(r.createdAt)} phone={r.phone} />
             ))
           ))}
 
         {tab === "leads" &&
-          (leads.length === 0 ? (
+          (shownLeads.length === 0 ? (
             <Empty>עדיין לא נאספו לידים מהדף.</Empty>
           ) : (
-            leads.map((l) => (
+            shownLeads.map((l) => (
               <Row
                 key={l.id}
                 title={l.name}

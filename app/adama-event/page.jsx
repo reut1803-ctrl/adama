@@ -31,7 +31,22 @@ const EMPTY_ROW = { name: "", phone: "", note: "" };
 
 // זיכרון מקומי בדפדפן של המשתמש בלבד. נשמר רק במכשיר שלו, לא אצלנו
 // ולא במסד הנתונים, ומפתח נפרד לכל אירוע כדי שאירוע חדש יתחיל מאפס.
-const storageKey = (ev) => `adama-event:${ev?.id || EVENT.id}`;
+const STORAGE_PREFIX = "adama-event:";
+const storageKey = (ev) => `${STORAGE_PREFIX}${ev?.id || EVENT.id}`;
+
+// ניקוי שאריות של אירועים קודמים מהמכשיר. בלי זה, מי שנרשם לאירוע קודם
+// נושא אותו איתו לנצח, ועלול לנחות במסך סיום ישן במקום בטופס של היום.
+function forgetOtherEvents(current) {
+  try {
+    const keep = storageKey(current);
+    const drop = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(STORAGE_PREFIX) && k !== keep) drop.push(k);
+    }
+    drop.forEach((k) => window.localStorage.removeItem(k));
+  } catch {}
+}
 
 export default function AdamaEventPage() {
   // פרטי האירוע. מתחילים מברירת המחדל המובנית, ואם יש הגדרות שמורות
@@ -59,6 +74,9 @@ export default function AdamaEventPage() {
   // ready נדלק אחרי ניסיון השחזור, כדי שלא נדרוס את מה ששמור
   // בכתיבה הראשונה, ושלא יהבהב מסך שלב 1 למי שכבר נרשם.
   const [ready, setReady] = useState(false);
+  // trusted = ידוע בוודאות איזה אירוע פעיל. בלי זה לא משחזרים ולא שומרים,
+  // כדי שלא נכתוב מצב תחת מזהה של אירוע ישן.
+  const [trusted, setTrusted] = useState(false);
 
   // טעינת ההגדרות, ואחריה שחזור: מי שרענן, סגר וחזר, או נכנס שוב
   // מהקישור - נוחת בדיוק במסך שבו היה, בלי להקליד שום דבר מחדש.
@@ -66,15 +84,23 @@ export default function AdamaEventPage() {
     let alive = true;
     (async () => {
       let resolved = EVENT;
+      let ok = false;
       try {
-        const { settings, photos } = await loadEventSettings();
+        const { settings, photos, blocked } = await loadEventSettings();
         resolved = resolveEvent(settings, photos);
+        // trusted = באמת יודעים איזה אירוע פעיל עכשיו. אם הקריאה נחסמה
+        // או נכשלה, אסור לשחזר מצב ישן: עדיף טופס נקי מאשר אירוע שגוי.
+        ok = !blocked;
       } catch {
         // אין הגדרות או שהקריאה נכשלה - ממשיכים עם ברירת המחדל
       }
       if (!alive) return;
       setEv(resolved);
-      restore(resolved);
+      setTrusted(ok);
+      if (ok) {
+        forgetOtherEvents(resolved);
+        restore(resolved);
+      }
       setReady(true);
     })();
     return () => {
@@ -85,7 +111,8 @@ export default function AdamaEventPage() {
   const restore = (forEvent) => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(storageKey(forEvent)) || "null");
-      if (saved && typeof saved === "object") {
+      // שחזור רק אם הרשומה שייכת בוודאות לאירוע הנוכחי
+      if (saved && typeof saved === "object" && (!saved.evId || saved.evId === forEvent.id)) {
         if (saved.step === "leads" || saved.step === "done") setStep(saved.step);
         if (saved.me) setMe({ name: saved.me.name || "", phone: saved.me.phone || "" });
         if (saved.rsvpId) setRsvpId(saved.rsvpId);
@@ -106,14 +133,14 @@ export default function AdamaEventPage() {
   // שמירה שוטפת. try/catch כי בגלישה פרטית הכתיבה עלולה להיכשל,
   // ואסור שזה יפיל את הדף.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !trusted) return;
     try {
       window.localStorage.setItem(
         storageKey(ev),
-        JSON.stringify({ step, me, rsvpId, rows, printed, refDone, refSaved })
+        JSON.stringify({ evId: ev.id, step, me, rsvpId, rows, printed, refDone, refSaved })
       );
     } catch {}
-  }, [ready, ev, step, me, rsvpId, rows, printed, refDone, refSaved]);
+  }, [ready, trusted, ev, step, me, rsvpId, rows, printed, refDone, refSaved]);
 
   // התחלה נקייה, למי שרוצה לרשום מישהו אחר מאותו מכשיר
   const startOver = () => {
