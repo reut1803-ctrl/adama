@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
+  MapPin, Navigation,
 } from "lucide-react";
-import { EVENT, saveRsvp, saveLeads, PITCH_GUIDE } from "@/lib/crm/eventStore";
+import {
+  EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventSettings, resolveEvent,
+} from "@/lib/crm/eventStore";
 
 // ============================================================================
 //  "ערב משדכים" — דף נחיתה עצמאי.
@@ -28,9 +31,13 @@ const EMPTY_ROW = { name: "", phone: "", note: "" };
 
 // זיכרון מקומי בדפדפן של המשתמש בלבד. נשמר רק במכשיר שלו, לא אצלנו
 // ולא במסד הנתונים, ומפתח נפרד לכל אירוע כדי שאירוע חדש יתחיל מאפס.
-const STORAGE_KEY = `adama-event:${EVENT.id}`;
+const storageKey = (ev) => `adama-event:${ev?.id || EVENT.id}`;
 
 export default function AdamaEventPage() {
+  // פרטי האירוע. מתחילים מברירת המחדל המובנית, ואם יש הגדרות שמורות
+  // בלוח הבקרה הן מחליפות אותה. כך הדף עובד גם אם אין הגדרות בכלל.
+  const [ev, setEv] = useState(EVENT);
+
   const [step, setStep] = useState("rsvp"); // rsvp | leads | done
   const [leaving, setLeaving] = useState(false);
   const [me, setMe] = useState({ name: "", phone: "" });
@@ -53,11 +60,31 @@ export default function AdamaEventPage() {
   // בכתיבה הראשונה, ושלא יהבהב מסך שלב 1 למי שכבר נרשם.
   const [ready, setReady] = useState(false);
 
-  // שחזור: מי שרענן, סגר וחזר, או נכנס שוב מהקישור - נוחת בדיוק
-  // במסך שבו היה, בלי להקליד שום דבר מחדש.
+  // טעינת ההגדרות, ואחריה שחזור: מי שרענן, סגר וחזר, או נכנס שוב
+  // מהקישור - נוחת בדיוק במסך שבו היה, בלי להקליד שום דבר מחדש.
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      let resolved = EVENT;
+      try {
+        const { settings, photos } = await loadEventSettings();
+        resolved = resolveEvent(settings, photos);
+      } catch {
+        // אין הגדרות או שהקריאה נכשלה - ממשיכים עם ברירת המחדל
+      }
+      if (!alive) return;
+      setEv(resolved);
+      restore(resolved);
+      setReady(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const restore = (forEvent) => {
     try {
-      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      const saved = JSON.parse(window.localStorage.getItem(storageKey(forEvent)) || "null");
       if (saved && typeof saved === "object") {
         if (saved.step === "leads" || saved.step === "done") setStep(saved.step);
         if (saved.me) setMe({ name: saved.me.name || "", phone: saved.me.phone || "" });
@@ -74,8 +101,7 @@ export default function AdamaEventPage() {
     } catch {
       // גלישה פרטית או חסימת אחסון - פשוט מתחילים רגיל
     }
-    setReady(true);
-  }, []);
+  };
 
   // שמירה שוטפת. try/catch כי בגלישה פרטית הכתיבה עלולה להיכשל,
   // ואסור שזה יפיל את הדף.
@@ -83,16 +109,16 @@ export default function AdamaEventPage() {
     if (!ready) return;
     try {
       window.localStorage.setItem(
-        STORAGE_KEY,
+        storageKey(ev),
         JSON.stringify({ step, me, rsvpId, rows, printed, refDone, refSaved })
       );
     } catch {}
-  }, [ready, step, me, rsvpId, rows, printed, refDone, refSaved]);
+  }, [ready, ev, step, me, rsvpId, rows, printed, refDone, refSaved]);
 
   // התחלה נקייה, למי שרוצה לרשום מישהו אחר מאותו מכשיר
   const startOver = () => {
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(storageKey(ev));
     } catch {}
     setMe({ name: "", phone: "" });
     setRsvpId(null);
@@ -122,7 +148,7 @@ export default function AdamaEventPage() {
     if (me.phone.trim().length < 6) return setErr("צריך מספר טלפון");
     setBusy(true);
     try {
-      setRsvpId(await saveRsvp(me));
+      setRsvpId(await saveRsvp(me, ev.id));
       goTo("leads");
     } catch {
       setErr("ההרשמה לא נשמרה. אפשר לנסות שוב בעוד רגע.");
@@ -160,7 +186,7 @@ export default function AdamaEventPage() {
     setRefBusy(true);
     try {
       // saveLeads יוצר מסמך נפרד לכל חבר באוסף event_leads, עם referred_by
-      const n = await saveLeads(rsvpId, friends, me);
+      const n = await saveLeads(rsvpId, friends, me, ev.id);
       setRefSaved(n);
       setRefDone(true);
       setFriends([{ ...EMPTY_ROW }]);
@@ -177,7 +203,7 @@ export default function AdamaEventPage() {
 
       {/* ====================== המסך (מוסתר בהדפסה) ====================== */}
       <div className="ev-screen">
-        <Hero />
+        <Hero ev={ev} />
 
         <main className="mx-auto w-full max-w-xl px-5 pb-24">
           <div
@@ -269,18 +295,46 @@ export default function AdamaEventPage() {
                   </div>
 
                   <div className="mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5">
-                    <Eyebrow icon={Video}>הכניסה לערב</Eyebrow>
-                    <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
-                      הערב מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
-                    </p>
-                    <a
-                      href={EVENT.zoomUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
-                    >
-                      <Video size={17} /> כניסה לזום
-                    </a>
+                    <Eyebrow icon={ev.mode === "place" ? MapPin : Video}>
+                      {ev.mode === "place" ? "איפה נפגשים" : "הכניסה לערב"}
+                    </Eyebrow>
+
+                    {ev.mode === "place" ? (
+                      <>
+                        <p className="mt-2 text-[15px] font-bold leading-relaxed text-[#3A2E26]">
+                          {ev.placeName || ev.place}
+                        </p>
+                        {ev.address && (
+                          <p className="mt-0.5 text-[14px] leading-relaxed text-[#7C6E60]">{ev.address}</p>
+                        )}
+                        {ev.navUrl && (
+                          <a
+                            href={ev.navUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
+                          >
+                            <Navigation size={17} /> ניווט ב-Waze
+                          </a>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
+                          הערב מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
+                        </p>
+                        {ev.zoomUrl && (
+                          <a
+                            href={ev.zoomUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
+                          >
+                            <Video size={17} /> כניסה לזום
+                          </a>
+                        )}
+                      </>
+                    )}
                   </div>
 
                   <button
@@ -399,19 +453,20 @@ export default function AdamaEventPage() {
       </div>
 
       {/* ====================== דף ההדפסה (מוסתר על המסך) ====================== */}
-      <PrepSheet rows={rows} owner={me} />
+      <PrepSheet rows={rows} owner={me} ev={ev} />
     </div>
   );
 }
 
 /* ───────────────────────── חלקי הדף ───────────────────────── */
 
-function Hero() {
+function Hero({ ev }) {
+  const PlaceIcon = ev.mode === "place" ? MapPin : Video;
   return (
     <header className="relative overflow-hidden">
       <div className="absolute inset-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={img("shepherd.jpg")} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+        <img src={ev.heroImage || img("shepherd.jpg")} alt="" aria-hidden="true" className="h-full w-full object-cover" />
         {/* מעבר רך: כהה רק בראש, בשביל קריאוּת הכותרת, מתבהר על הרועה
             והכבשים, ונמס אל צבע הרקע של הדף בתחתית */}
         <div
@@ -425,16 +480,31 @@ function Hero() {
 
       <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-14 text-center">
         <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
-        <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">ערב משדכים</h1>
+        <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">{ev.title}</h1>
         <p className="mx-auto mt-3 max-w-sm text-[16px] leading-relaxed text-white/85">
           ערב אחד, חדר אחד, וכל השמות שאנחנו נושאים בלב. באים מוכנים — ויוצאים עם התאמות.
         </p>
 
         <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
-          <Pill icon={CalendarDays}>{EVENT.dateLabel} · {EVENT.dateShort}</Pill>
-          <Pill icon={Clock}>{EVENT.time}</Pill>
-          <Pill icon={Video}>{EVENT.place}</Pill>
+          <Pill icon={CalendarDays}>{ev.dateLabel} · {ev.dateShort}</Pill>
+          <Pill icon={Clock}>{ev.time}</Pill>
+          <Pill icon={PlaceIcon}>{ev.place}</Pill>
         </div>
+
+        {ev.gallery.length > 0 && (
+          <div className="mx-auto mt-7 flex max-w-sm items-center justify-center gap-2">
+            {ev.gallery.map((src, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={src}
+                alt=""
+                aria-hidden="true"
+                className="h-20 w-full rounded-2xl border border-white/30 object-cover shadow-[0_10px_24px_-14px_rgba(58,46,38,0.8)]"
+              />
+            ))}
+          </div>
+        )}
       </div>
     </header>
   );
@@ -506,7 +576,7 @@ function PrimaryButton({ onClick, busy, disabled, children }) {
 
 /* ───────────────────────── דף ההכנה להדפסה ───────────────────────── */
 
-function PrepSheet({ rows, owner }) {
+function PrepSheet({ rows, owner, ev }) {
   const list = rows.filter((r) => r.name.trim().length >= 2);
   const shown = list.length ? list : [{ name: "", phone: "", note: "" }, { name: "", phone: "", note: "" }, { name: "", phone: "", note: "" }];
 
@@ -516,11 +586,12 @@ function PrepSheet({ rows, owner }) {
         <div className="ev-head">
           <div>
             <p className="ev-brand">א ד מ ה</p>
-            <h1 className="ev-title">דף העבודה שלי · ערב משדכים</h1>
+            <h1 className="ev-title">דף העבודה שלי · {ev.title}</h1>
           </div>
           <div className="ev-when">
-            <p>{EVENT.dateLabel}</p>
-            <p>{EVENT.dateShort} · {EVENT.time}</p>
+            <p>{ev.dateLabel}</p>
+            <p>{ev.dateShort} · {ev.time}</p>
+            <p>{ev.mode === "place" ? ev.placeName || ev.place : "בזום"}</p>
           </div>
         </div>
 

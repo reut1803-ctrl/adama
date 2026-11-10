@@ -158,6 +158,15 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // הגדרות האירוע: תאריך, שעה, מקום, קישורים ותמונות.
+    // get פתוח לכולם כי דף הנחיתה הציבורי חייב לקרוא אותן בלי התחברות,
+    // ואין שם שום מידע אישי. הכתיבה שמורה למנהלת בלבד.
+    match /event_settings/{id} {
+      allow get: if true;
+      allow list: if isStaff();
+      allow write: if isAdmin();
+    }
+
     match /telemetry/{staffEmail} {
       allow read: if isStaff();
       allow write: if isStaff() && myEmail() == staffEmail;

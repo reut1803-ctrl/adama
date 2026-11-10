@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, Users, Sparkles, Phone, MessageCircle, AlertTriangle, Link2, Check } from "lucide-react";
+import {
+  CalendarDays, Users, Sparkles, Phone, MessageCircle, AlertTriangle, Link2, Check,
+  Settings2, ChevronDown, Video, MapPin, ImagePlus, Trash2, Loader2, Navigation,
+} from "lucide-react";
 import { useCrmStore } from "@/lib/crm/store";
-import { EVENT, subscribeEvent } from "@/lib/crm/eventStore";
+import {
+  EVENT, subscribeEvent, loadEventSettings, resolveEvent,
+  saveEventSettings, saveEventPhoto, removeEventPhoto,
+} from "@/lib/crm/eventStore";
+import { compressToDataUrl } from "@/lib/crm/imageCompress";
 import { waDigits } from "@/components/crm/profiles/ProfileCard";
 import { prettyPhone } from "@/components/crm/ui/CopyStaffButton";
 
@@ -18,6 +25,24 @@ export default function EventAdmin() {
   const [leads, setLeads] = useState([]);
   const [blocked, setBlocked] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [ev, setEv] = useState(EVENT);
+  const [reload, setReload] = useState(0);
+
+  // פרטי האירוע הנוכחיים, כפי שהם מוצגים בדף הנחיתה
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { settings, photos } = await loadEventSettings();
+        if (alive) setEv(resolveEvent(settings, photos));
+      } catch {
+        // נשארים עם ברירת המחדל
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [reload]);
 
   useEffect(() => {
     if (role !== "admin" && role !== "staff") return undefined;
@@ -51,11 +76,21 @@ export default function EventAdmin() {
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-[#3A2E26]">
-            <CalendarDays size={17} className="text-[#844442]" /> {EVENT.title}
+            <CalendarDays size={17} className="text-[#844442]" /> {ev.title}
           </h2>
           <p className="mt-0.5 text-[12px] text-[#7C6E60]">
-            {EVENT.dateLabel} · {EVENT.dateShort} · {EVENT.time} · {EVENT.place}
+            {ev.dateLabel} · {ev.dateShort} · {ev.time} · {ev.place}
           </p>
+          {ev.mode === "place" && ev.navUrl && (
+            <a
+              href={ev.navUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-bold text-[#62826B]"
+            >
+              <Navigation size={12} /> ניווט ב-Waze
+            </a>
+          )}
         </div>
         <button
           onClick={copyLink}
@@ -74,6 +109,8 @@ export default function EventAdmin() {
           בקונסולת Firebase. עד אז הדף לא ישמור ולא יוצג כאן מידע.
         </p>
       )}
+
+      {role === "admin" && <EventSettings onSaved={() => setReload((n) => n + 1)} />}
 
       <div className="mt-3 flex rounded-2xl border border-[#CCBDAB] bg-[#F5EFE6] p-1">
         {[
@@ -119,6 +156,273 @@ export default function EventAdmin() {
           ))}
       </div>
     </section>
+  );
+}
+
+
+/* ───────────────────── הגדרות האירוע (למנהלת בלבד) ───────────────────── */
+
+const EMPTY_SETTINGS = {
+  title: "",
+  dateLabel: "",
+  dateShort: "",
+  time: "",
+  mode: "zoom",
+  zoomUrl: "",
+  placeName: "",
+  address: "",
+  wazeUrl: "",
+};
+
+function EventSettings({ onSaved }) {
+  const showToast = useCrmStore((s) => s.showToast);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY_SETTINGS);
+  const [photos, setPhotos] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    let alive = true;
+    (async () => {
+      const { settings, photos: ph } = await loadEventSettings();
+      if (!alive) return;
+      const base = resolveEvent(settings, ph);
+      setForm({
+        title: base.title,
+        dateLabel: base.dateLabel,
+        dateShort: base.dateShort,
+        time: base.time,
+        mode: base.mode,
+        zoomUrl: base.zoomUrl,
+        placeName: base.placeName,
+        address: base.address,
+        wazeUrl: base.wazeUrl,
+      });
+      setPhotos(ph || {});
+      setLoaded(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [open, loaded]);
+
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const save = async () => {
+    setErr("");
+    if (form.dateShort.trim().length < 3) return setErr("צריך למלא תאריך, למשל 21.11");
+    if (form.time.trim().length < 3) return setErr("צריך למלא שעה, למשל 20:45");
+    if (form.mode === "place" && !form.placeName.trim() && !form.address.trim())
+      return setErr("במפגש פיזי צריך שם מקום או כתובת");
+    setBusy(true);
+    try {
+      await saveEventSettings(form);
+      showToast("הגדרות האירוע נשמרו");
+      if (onSaved) onSaved();
+    } catch {
+      setErr("השמירה נכשלה. אם זה חוזר, צריך לרענן ולנסות שוב.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickPhoto = async (slot, file) => {
+    if (!file) return;
+    setErr("");
+    setBusy(true);
+    try {
+      const dataUrl = await compressToDataUrl(file);
+      await saveEventPhoto(slot, dataUrl);
+      setPhotos((p) => ({ ...p, [slot]: dataUrl }));
+      showToast("התמונה נשמרה");
+    } catch (e) {
+      setErr(e?.message || "התמונה לא נשמרה");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dropPhoto = async (slot) => {
+    setBusy(true);
+    try {
+      await removeEventPhoto(slot);
+      setPhotos((p) => ({ ...p, [slot]: "" }));
+      showToast("התמונה הוסרה");
+    } catch {
+      setErr("ההסרה נכשלה");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-2xl border border-[#CCBDAB] bg-[#FBF7F1]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3.5 py-3 text-right"
+      >
+        <span className="flex items-center gap-1.5 text-[13px] font-bold text-[#3A2E26]">
+          <Settings2 size={15} className="text-[#844442]" /> הגדרות האירוע
+        </span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-[#A2937F] transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <div className="border-t border-[#E8DCCB] px-3.5 pb-4 pt-3">
+          {!loaded ? (
+            <p className="py-6 text-center text-[12.5px] text-[#7C6E60]">טוען…</p>
+          ) : (
+            <>
+              <SField label="שם האירוע" value={form.title} onChange={(v) => set({ title: v })} placeholder="ערב משדכים" />
+
+              <div className="mt-2.5 grid grid-cols-2 gap-2">
+                <SField label="תאריך קצר" value={form.dateShort} onChange={(v) => set({ dateShort: v })} placeholder="21.11" />
+                <SField label="שעה" value={form.time} onChange={(v) => set({ time: v })} placeholder="20:45" />
+              </div>
+
+              <SField
+                label="יום ותאריך עברי"
+                value={form.dateLabel}
+                onChange={(v) => set({ dateLabel: v })}
+                placeholder="מוצאי שבת · י״א כסלו"
+              />
+
+              <p className="mb-1.5 mt-3.5 text-[12px] font-bold text-[#5E5048]">איפה מתקיים?</p>
+              <div className="flex rounded-2xl border border-[#CCBDAB] bg-white p-1">
+                {[
+                  ["zoom", "בזום", Video],
+                  ["place", "מפגש פיזי", MapPin],
+                ].map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    onClick={() => set({ mode: id })}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[12.5px] font-bold transition ${
+                      form.mode === id ? "bg-[#844442] text-white" : "text-[#7C6E60]"
+                    }`}
+                  >
+                    <Icon size={14} /> {label}
+                  </button>
+                ))}
+              </div>
+
+              {form.mode === "zoom" ? (
+                <SField
+                  label="קישור הזום"
+                  value={form.zoomUrl}
+                  onChange={(v) => set({ zoomUrl: v })}
+                  placeholder="https://zoom.us/j/..."
+                  dir="ltr"
+                />
+              ) : (
+                <>
+                  <SField label="שם המקום" value={form.placeName} onChange={(v) => set({ placeName: v })} placeholder="מועדון חוות גבעות" />
+                  <SField label="כתובת מלאה" value={form.address} onChange={(v) => set({ address: v })} placeholder="רחוב, מספר, יישוב" />
+                  <SField
+                    label="קישור Waze (לא חובה)"
+                    value={form.wazeUrl}
+                    onChange={(v) => set({ wazeUrl: v })}
+                    placeholder="אם ריק, נבנה אוטומטית מהכתובת"
+                    dir="ltr"
+                  />
+                </>
+              )}
+
+              <p className="mb-1.5 mt-3.5 text-[12px] font-bold text-[#5E5048]">תמונות</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ["hero", "תמונה ראשית"],
+                  ["photo1", "תמונה 2"],
+                  ["photo2", "תמונה 3"],
+                  ["photo3", "תמונה 4"],
+                ].map(([slot, label]) => (
+                  <PhotoSlot
+                    key={slot}
+                    label={label}
+                    src={photos[slot]}
+                    busy={busy}
+                    onPick={(file) => pickPhoto(slot, file)}
+                    onDrop={() => dropPhoto(slot)}
+                  />
+                ))}
+              </div>
+
+              {err && (
+                <p className="mt-3 rounded-xl bg-[#FBEDEC] px-3 py-2 text-[12px] font-semibold text-[#C24545]">{err}</p>
+              )}
+
+              <button
+                onClick={save}
+                disabled={busy}
+                className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#844442] py-3 text-[14px] font-bold text-white transition active:scale-[0.98] disabled:opacity-45"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <>שמירת ההגדרות</>}
+              </button>
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-[#A2937F]">
+                שינוי התאריך או השעה פותח אירוע חדש: הנרשמים הקודמים נשמרים, וכל מי שנכנס
+                לדף מתחיל מהתחלה.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SField({ label, value, onChange, placeholder, dir }) {
+  return (
+    <label className="mt-2.5 block">
+      <span className="mb-1 block text-[11.5px] font-bold text-[#5E5048]">{label}</span>
+      <input
+        dir={dir}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-[#CCBDAB] bg-white px-3 py-2 text-[13px] text-[#3A2E26] outline-none transition placeholder:text-[#BCAC97] focus:border-[#844442]"
+      />
+    </label>
+  );
+}
+
+function PhotoSlot({ label, src, busy, onPick, onDrop }) {
+  return (
+    <div className="rounded-2xl border border-[#CCBDAB] bg-white p-2">
+      <p className="mb-1.5 text-[11px] font-bold text-[#7C6E60]">{label}</p>
+      {src ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" className="h-20 w-full rounded-xl object-cover" />
+          <button
+            onClick={onDrop}
+            disabled={busy}
+            className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-xl border border-[#E8DCCB] py-1.5 text-[11px] font-bold text-[#C24545] transition active:scale-95 disabled:opacity-45"
+          >
+            <Trash2 size={12} /> הסרה
+          </button>
+        </>
+      ) : (
+        <label className="flex h-20 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-[#D9CBB8] text-[11.5px] font-bold text-[#844442] transition hover:bg-[#FBF7F1]">
+          <ImagePlus size={15} className="ml-1" /> העלאה
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              onPick(f);
+            }}
+          />
+        </label>
+      )}
+    </div>
   );
 }
 
