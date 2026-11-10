@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
   MapPin, Navigation,
@@ -462,11 +462,45 @@ export default function AdamaEventPage() {
 
 function Hero({ ev }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
+
+  // כל התמונות שהועלו, לפי הסדר. אם אין אף אחת - התמונה המובנית.
+  const slides = useMemo(() => {
+    const all = [ev.heroImage, ...(ev.gallery || [])].filter(Boolean);
+    return all.length ? all : [img("shepherd.jpg")];
+  }, [ev]);
+
+  const [slide, setSlide] = useState(0);
+
+  // החלפה אוטומטית רכה. תמונה אחת = רקע קבוע, בדיוק כמו קודם.
+  // מי שביקש במכשיר שלו להפחית תנועה מקבל רקע קבוע.
+  useEffect(() => {
+    setSlide(0);
+    if (slides.length < 2) return undefined;
+    let reduced = false;
+    try {
+      reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {}
+    if (reduced) return undefined;
+    const t = setInterval(() => setSlide((n) => (n + 1) % slides.length), 5200);
+    return () => clearInterval(t);
+  }, [slides]);
+
+  const current = Math.min(slide, slides.length - 1);
+
   return (
     <header className="relative overflow-hidden">
       <div className="absolute inset-0">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={ev.heroImage || img("shepherd.jpg")} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+        {slides.map((src, n) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={n}
+            src={src}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
+            style={{ opacity: n === current ? 1 : 0 }}
+          />
+        ))}
         {/* מעבר רך: כהה רק בראש, בשביל קריאוּת הכותרת, מתבהר על הרועה
             והכבשים, ונמס אל צבע הרקע של הדף בתחתית */}
         <div
@@ -482,7 +516,7 @@ function Hero({ ev }) {
         <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
         <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">{ev.title}</h1>
         <p className="mx-auto mt-3 max-w-sm text-[16px] leading-relaxed text-white/85">
-          ערב אחד, חדר אחד, וכל השמות שאנחנו נושאים בלב. באים מוכנים — ויוצאים עם התאמות.
+          {ev.tagline}
         </p>
 
         <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
@@ -491,16 +525,16 @@ function Hero({ ev }) {
           <Pill icon={PlaceIcon}>{ev.place}</Pill>
         </div>
 
-        {ev.gallery.length > 0 && (
-          <div className="mx-auto mt-7 flex max-w-sm items-center justify-center gap-2">
-            {ev.gallery.map((src, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={src}
-                alt=""
-                aria-hidden="true"
-                className="h-20 w-full rounded-2xl border border-white/30 object-cover shadow-[0_10px_24px_-14px_rgba(58,46,38,0.8)]"
+        {slides.length > 1 && (
+          <div className="mx-auto mt-7 flex items-center justify-center gap-2">
+            {slides.map((_, n) => (
+              <button
+                key={n}
+                onClick={() => setSlide(n)}
+                aria-label={`תמונה ${n + 1}`}
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  n === current ? "w-7 bg-white" : "w-2 bg-white/45 hover:bg-white/70"
+                }`}
               />
             ))}
           </div>

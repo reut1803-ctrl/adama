@@ -164,6 +164,7 @@ export default function EventAdmin() {
 
 const EMPTY_SETTINGS = {
   title: "",
+  tagline: "",
   dateLabel: "",
   dateShort: "",
   time: "",
@@ -192,6 +193,7 @@ function EventSettings({ onSaved }) {
       const base = resolveEvent(settings, ph);
       setForm({
         title: base.title,
+        tagline: base.tagline,
         dateLabel: base.dateLabel,
         dateShort: base.dateShort,
         time: base.time,
@@ -280,6 +282,14 @@ function EventSettings({ onSaved }) {
           ) : (
             <>
               <SField label="שם האירוע" value={form.title} onChange={(v) => set({ title: v })} placeholder="ערב משדכים" />
+
+              <SField
+                label="משפט הפתיחה"
+                value={form.tagline}
+                onChange={(v) => set({ tagline: v })}
+                placeholder="המשפט שמופיע מתחת לשם האירוע"
+                area
+              />
 
               <div className="mt-2.5 grid grid-cols-2 gap-2">
                 <SField label="תאריך קצר" value={form.dateShort} onChange={(v) => set({ dateShort: v })} placeholder="21.11" />
@@ -375,17 +385,30 @@ function EventSettings({ onSaved }) {
   );
 }
 
-function SField({ label, value, onChange, placeholder, dir }) {
+function SField({ label, value, onChange, placeholder, dir, area }) {
+  const cls =
+    "w-full rounded-xl border border-[#CCBDAB] bg-white px-3 py-2 text-[13px] text-[#3A2E26] outline-none transition placeholder:text-[#BCAC97] focus:border-[#844442]";
   return (
     <label className="mt-2.5 block">
       <span className="mb-1 block text-[11.5px] font-bold text-[#5E5048]">{label}</span>
-      <input
-        dir={dir}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-[#CCBDAB] bg-white px-3 py-2 text-[13px] text-[#3A2E26] outline-none transition placeholder:text-[#BCAC97] focus:border-[#844442]"
-      />
+      {area ? (
+        <textarea
+          rows={3}
+          dir={dir}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${cls} resize-none leading-relaxed`}
+        />
+      ) : (
+        <input
+          dir={dir}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={cls}
+        />
+      )}
     </label>
   );
 }
