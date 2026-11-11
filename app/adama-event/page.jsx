@@ -579,6 +579,15 @@ export default function AdamaEventPage() {
 function Hero({ ev, known }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
+  // כותרת ארוכה יורדת בגודל במקום להישבר לשורות דחוסות.
+  // text-balance מחלק את השורות באופן שווה, ולכן אין שבירה באמצע משפט.
+  const titleLen = (ev.title || "").length;
+  const titleSize =
+    titleLen > 44 ? "text-[26px] leading-[1.22]"
+    : titleLen > 30 ? "text-[30px] leading-[1.2]"
+    : titleLen > 18 ? "text-[34px] leading-[1.15]"
+    : "text-[40px] leading-[1.1]";
+
   // כל התמונות שהועלו, לפי הסדר. אם אין אף אחת - התמונה המובנית.
   // חתימה יציבה: אותן תמונות בדיוק = אותה רשימה, ולכן הקרוסלה אינה
   // מתאפסת כשפרטי האירוע נטענים מחדש מהשרת ומחליפים את העותק המקומי.
@@ -627,7 +636,7 @@ function Hero({ ev, known }) {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(to bottom, rgba(58,46,38,0.74) 0%, rgba(58,46,38,0.46) 24%, rgba(58,46,38,0.16) 50%, rgba(58,46,38,0.04) 64%, rgba(245,239,230,0.32) 78%, rgba(245,239,230,0.86) 92%, #F5EFE6 100%)",
+              "linear-gradient(to bottom, rgba(42,32,26,0.82) 0%, rgba(42,32,26,0.66) 26%, rgba(42,32,26,0.46) 46%, rgba(42,32,26,0.26) 62%, rgba(245,239,230,0.30) 80%, rgba(245,239,230,0.86) 93%, #F5EFE6 100%)",
           }}
         />
       </div>
@@ -649,19 +658,19 @@ function Hero({ ev, known }) {
             className="pointer-events-none absolute left-1/2 -top-8 bottom-[-18px] w-screen -translate-x-1/2"
             style={{
               background:
-                "radial-gradient(58% 78% at 50% 44%, rgba(38,29,23,0.58) 0%, rgba(38,29,23,0.44) 40%, rgba(38,29,23,0.18) 66%, rgba(38,29,23,0) 84%)",
+                "radial-gradient(62% 80% at 50% 44%, rgba(30,23,18,0.52) 0%, rgba(30,23,18,0.38) 42%, rgba(30,23,18,0.16) 68%, rgba(30,23,18,0) 86%)",
             }}
           />
 
           <div className="relative">
             <h1
-              className="mt-3 text-[40px] font-bold leading-[1.1] text-white"
+              className={`mx-auto mt-3 max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
               style={{ textShadow: "0 2px 16px rgba(30,22,17,0.6), 0 1px 3px rgba(30,22,17,0.55)" }}
             >
               {ev.title}
             </h1>
             <p
-              className="mx-auto mt-3 max-w-sm text-[16px] font-medium leading-relaxed text-white"
+              className="mx-auto mt-3.5 max-w-[34ch] text-balance text-[16px] font-medium leading-[1.7] text-white"
               style={{ textShadow: "0 2px 14px rgba(30,22,17,0.72), 0 1px 2px rgba(30,22,17,0.6)" }}
             >
               {ev.tagline}
