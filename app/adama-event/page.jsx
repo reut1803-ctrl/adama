@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
   MapPin, Navigation,
@@ -33,6 +33,35 @@ const EMPTY_ROW = { name: "", phone: "", note: "" };
 // ולא במסד הנתונים, ומפתח נפרד לכל אירוע כדי שאירוע חדש יתחיל מאפס.
 const STORAGE_PREFIX = "adama-event:";
 const storageKey = (ev) => `${STORAGE_PREFIX}${ev?.id || EVENT.id}`;
+
+// עותק מקומי של פרטי האירוע האחרון שנטען במכשיר הזה. בזכותו ביקור חוזר
+// מצייר מיד את האירוע הנכון, במקום להמתין לתשובה מהרשת ואז להחליף מולה
+// את המסך. המפתח בכוונה בלי נקודתיים, כדי שניקוי האירועים לא ימחק אותו.
+const CACHE_KEY = "adama-last-event";
+
+function readCache() {
+  try {
+    const c = JSON.parse(window.localStorage.getItem(CACHE_KEY) || "null");
+    return c && typeof c === "object" && c.id ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(ev) {
+  try {
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(ev));
+    return;
+  } catch {}
+  // אין מקום לתמונות: שומרים לפחות את הטקסט
+  try {
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify({ ...ev, heroImage: "", gallery: [] }));
+  } catch {}
+}
+
+// useLayoutEffect רץ לפני הציור, ולכן העותק המקומי נכנס בלי הבהוב.
+// בבנייה הסטטית אין window, ושם נופלים ל-useEffect כדי לא להזהיר.
+const useBeforePaint = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // ניקוי שאריות של אירועים קודמים מהמכשיר. בלי זה, מי שנרשם לאירוע קודם
 // נושא אותו איתו לנצח, ועלול לנחות במסך סיום ישן במקום בטופס של היום.
@@ -77,6 +106,19 @@ export default function AdamaEventPage() {
   // trusted = ידוע בוודאות איזה אירוע פעיל. בלי זה לא משחזרים ולא שומרים,
   // כדי שלא נכתוב מצב תחת מזהה של אירוע ישן.
   const [trusted, setTrusted] = useState(false);
+  // known = יש לנו פרטי אירוע אמיתיים להציג. עד אז לא מציירים את
+  // הכותרת והתגיות, כדי שלא יופיע לרגע אירוע ישן ואז יתחלף.
+  const [known, setKnown] = useState(false);
+
+  // ציור מיידי מהעותק המקומי, לפני כל פנייה לרשת
+  useBeforePaint(() => {
+    const cached = readCache();
+    if (!cached) return;
+    setEv(cached);
+    setKnown(true);
+    restore(cached);
+    setReady(true);
+  }, []);
 
   // טעינת ההגדרות, ואחריה שחזור: מי שרענן, סגר וחזר, או נכנס שוב
   // מהקישור - נוחת בדיוק במסך שבו היה, בלי להקליד שום דבר מחדש.
@@ -95,12 +137,17 @@ export default function AdamaEventPage() {
         // אין הגדרות או שהקריאה נכשלה - ממשיכים עם ברירת המחדל
       }
       if (!alive) return;
+      const cachedId = readCache()?.id || null;
       setEv(resolved);
       setTrusted(ok);
       if (ok) {
+        writeCache(resolved);
         forgetOtherEvents(resolved);
+        // העותק המקומי היה של אירוע אחר: מתחילים אותו מחדש
+        if (cachedId && cachedId !== resolved.id) resetFlow();
         restore(resolved);
       }
+      setKnown(true);
       setReady(true);
     })();
     return () => {
@@ -141,6 +188,20 @@ export default function AdamaEventPage() {
       );
     } catch {}
   }, [ready, trusted, ev, step, me, rsvpId, rows, printed, refDone, refSaved]);
+
+  // איפוס כל שדות הזרימה למצב התחלתי
+  const resetFlow = () => {
+    setStep("rsvp");
+    setMe({ name: "", phone: "" });
+    setRsvpId(null);
+    setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+    setPrinted(false);
+    setFriends([{ ...EMPTY_ROW }]);
+    setRefDone(false);
+    setRefSaved(0);
+    setRefErr("");
+    setErr("");
+  };
 
   // התחלה נקייה, למי שרוצה לרשום מישהו אחר מאותו מכשיר
   const startOver = () => {
@@ -230,7 +291,7 @@ export default function AdamaEventPage() {
 
       {/* ====================== המסך (מוסתר בהדפסה) ====================== */}
       <div className="ev-screen">
-        <Hero ev={ev} />
+        <Hero ev={ev} known={known} />
 
         <main className="mx-auto w-full max-w-xl px-5 pb-24">
           <div
@@ -487,7 +548,7 @@ export default function AdamaEventPage() {
 
 /* ───────────────────────── חלקי הדף ───────────────────────── */
 
-function Hero({ ev }) {
+function Hero({ ev, known }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
   // כל התמונות שהועלו, לפי הסדר. אם אין אף אחת - התמונה המובנית.
@@ -541,6 +602,14 @@ function Hero({ ev }) {
 
       <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-14 text-center">
         <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
+
+        {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
+            כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
+        <div
+          className="transition-opacity duration-500"
+          style={{ opacity: known ? 1 : 0 }}
+          aria-hidden={known ? undefined : "true"}
+        >
         <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">{ev.title}</h1>
         <p className="mx-auto mt-3 max-w-sm text-[16px] leading-relaxed text-white/85">
           {ev.tagline}
@@ -552,7 +621,9 @@ function Hero({ ev }) {
           <Pill icon={PlaceIcon}>{ev.place}</Pill>
         </div>
 
-        {slides.length > 1 && (
+        </div>
+
+        {known && slides.length > 1 && (
           <div className="mx-auto mt-7 flex items-center justify-center gap-2">
             {slides.map((_, n) => (
               <button
