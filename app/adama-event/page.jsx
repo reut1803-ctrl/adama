@@ -6,7 +6,7 @@ import {
   MapPin, Navigation,
 } from "lucide-react";
 import {
-  EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventSettings, resolveEvent,
+  EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventDetails, loadEventPhotos, resolveEvent,
 } from "@/lib/crm/eventStore";
 
 // ============================================================================
@@ -125,30 +125,53 @@ export default function AdamaEventPage() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // שתי הקריאות יוצאות יחד, אבל הדף אינו ממתין לתמונות: ברגע
+      // שפרטי האירוע חוזרים הוא כבר מצויר במלואו, והתמונות נכנסות
+      // אחר כך ברכות אל הרקע.
+      const photosPromise = loadEventPhotos().catch(() => ({}));
+
       let resolved = EVENT;
       let ok = false;
+      let settings = null;
       try {
-        const { settings, photos, blocked } = await loadEventSettings();
-        resolved = resolveEvent(settings, photos);
-        // trusted = באמת יודעים איזה אירוע פעיל עכשיו. אם הקריאה נחסמה
+        const details = await loadEventDetails();
+        settings = details.settings;
+        resolved = resolveEvent(settings, {});
+        // ok = באמת יודעים איזה אירוע פעיל עכשיו. אם הקריאה נחסמה
         // או נכשלה, אסור לשחזר מצב ישן: עדיף טופס נקי מאשר אירוע שגוי.
-        ok = !blocked;
+        ok = !details.blocked;
       } catch {
         // אין הגדרות או שהקריאה נכשלה - ממשיכים עם ברירת המחדל
       }
       if (!alive) return;
-      const cachedId = readCache()?.id || null;
+
+      // התמונות שכבר מצוירות מהעותק המקומי נשארות על המסך, כדי שהרקע
+      // לא יקפוץ לרגע לתמונה המובנית בזמן שהתמונות האמיתיות בדרך
+      const cached = readCache();
+      const cachedId = cached?.id || null;
+      if (cached && cached.id === resolved.id) {
+        resolved = { ...resolved, heroImage: cached.heroImage || "", gallery: cached.gallery || [] };
+      }
+
       setEv(resolved);
       setTrusted(ok);
       if (ok) {
-        writeCache(resolved);
         forgetOtherEvents(resolved);
-        // העותק המקומי היה של אירוע אחר: מתחילים אותו מחדש
-        if (cachedId && cachedId !== resolved.id) resetFlow();
-        restore(resolved);
+        if (cachedId !== resolved.id) {
+          // אירוע אחר ממה שהיה שמור כאן: מתחילים נקי ומשחזרים את החדש
+          if (cachedId) resetFlow();
+          restore(resolved);
+        }
       }
       setKnown(true);
       setReady(true);
+
+      // שלב שני: התמונות נכנסות אל הרקע כשהן מוכנות
+      const photos = await photosPromise;
+      if (!alive || !ok) return;
+      const withPhotos = resolveEvent(settings, photos);
+      setEv(withPhotos);
+      writeCache(withPhotos);
     })();
     return () => {
       alive = false;
@@ -296,9 +319,14 @@ export default function AdamaEventPage() {
         <main className="mx-auto w-full max-w-xl px-5 pb-24">
           <div
             className="transition-all duration-300"
-            style={{ opacity: leaving ? 0 : 1, transform: leaving ? "translateY(14px)" : "none" }}
+            style={{
+              opacity: leaving || !ready ? 0 : 1,
+              transform: leaving ? "translateY(14px)" : "none",
+              visibility: ready ? "visible" : "hidden",
+            }}
+            aria-hidden={ready ? undefined : "true"}
           >
-            {ready && step === "rsvp" && (
+            {step === "rsvp" && (
               <Card>
                 <Eyebrow icon={CalendarDays}>שריון מקום</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">אני מגיע/ה</h2>
@@ -319,7 +347,7 @@ export default function AdamaEventPage() {
               </Card>
             )}
 
-            {ready && step === "leads" && (
+            {step === "leads" && (
               <Card>
                 <Eyebrow icon={Sparkles}>שלב שני</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה לערב?</h2>
@@ -367,7 +395,7 @@ export default function AdamaEventPage() {
               </Card>
             )}
 
-            {ready && step === "done" && (
+            {step === "done" && (
               <>
                 <Card>
                   <div className="flex flex-col items-center text-center">
@@ -552,10 +580,14 @@ function Hero({ ev, known }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
   // כל התמונות שהועלו, לפי הסדר. אם אין אף אחת - התמונה המובנית.
+  // חתימה יציבה: אותן תמונות בדיוק = אותה רשימה, ולכן הקרוסלה אינה
+  // מתאפסת כשפרטי האירוע נטענים מחדש מהשרת ומחליפים את העותק המקומי.
+  const sig = `${ev.heroImage ? ev.heroImage.length : 0}|${(ev.gallery || []).map((g) => g.length).join(",")}`;
   const slides = useMemo(() => {
     const all = [ev.heroImage, ...(ev.gallery || [])].filter(Boolean);
     return all.length ? all : [img("shepherd.jpg")];
-  }, [ev]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
 
   const [slide, setSlide] = useState(0);
 
@@ -576,7 +608,7 @@ function Hero({ ev, known }) {
   const current = Math.min(slide, slides.length - 1);
 
   return (
-    <header className="relative overflow-hidden">
+    <header className="relative min-h-[54vh] overflow-hidden">
       <div className="absolute inset-0">
         {slides.map((src, n) => (
           // eslint-disable-next-line @next/next/no-img-element
@@ -606,7 +638,7 @@ function Hero({ ev, known }) {
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
             כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
         <div
-          className="transition-opacity duration-500"
+          className="transition-opacity duration-300"
           style={{ opacity: known ? 1 : 0 }}
           aria-hidden={known ? undefined : "true"}
         >
@@ -623,9 +655,15 @@ function Hero({ ev, known }) {
 
         </div>
 
-        {known && slides.length > 1 && (
-          <div className="mx-auto mt-7 flex items-center justify-center gap-2">
-            {slides.map((_, n) => (
+        {/* שורת הנקודות שומרת על גובה קבוע גם לפני שהיא מופיעה,
+            כדי ששום דבר מתחתיה לא יזוז כשהיא נכנסת */}
+        <div
+          className="mx-auto mt-7 flex h-2 items-center justify-center gap-2 transition-opacity duration-300"
+          style={{ opacity: known && slides.length > 1 ? 1 : 0 }}
+          aria-hidden={known && slides.length > 1 ? undefined : "true"}
+        >
+          {slides.length > 1 &&
+            slides.map((_, n) => (
               <button
                 key={n}
                 onClick={() => setSlide(n)}
@@ -635,8 +673,7 @@ function Hero({ ev, known }) {
                 }`}
               />
             ))}
-          </div>
-        )}
+        </div>
       </div>
     </header>
   );
