@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { Archive, ChevronDown, RotateCcw, Trash2 } from "lucide-react";
 import ConfirmDialog from "@/components/crm/ui/ConfirmDialog";
+import ManualHistoryEntry from "@/components/crm/proposals/ManualHistoryEntry";
 import { useCrmStore, PROPOSAL_DROPPED } from "@/lib/crm/store";
 import { lastDropInfo, toMillis } from "@/lib/crm/attention";
 
@@ -127,7 +128,9 @@ export default function DroppedArchive({ proposals }) {
 
       {open && (
         <>
-          <p className="mt-2 px-1 text-[11px] leading-relaxed text-[#7C6E60]">
+          <ManualHistoryEntry />
+
+          <p className="mt-3 px-1 text-[11px] leading-relaxed text-[#7C6E60]">
             {rows.length === 0
               ? "עדיין לא ירדה מהפרק אף הצעה. כשהצעה תרד, היא תעבור לכאן מיד ותיעלם מהלוח הפעיל שלמעלה."
               : "ההצעות האלה ירדו מהפרק ולכן אינן מוצגות בלוח הפעיל. הן שמורות במערכת ומשמשות להתראת הכפילות. אפשר להחזיר כל אחת מהן ללוח בלחיצה על החץ המעגלי."}
