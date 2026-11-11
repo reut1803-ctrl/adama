@@ -638,20 +638,41 @@ function Hero({ ev, known }) {
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
             כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
         <div
-          className="transition-opacity duration-300"
+          className="relative transition-opacity duration-300"
           style={{ opacity: known ? 1 : 0 }}
           aria-hidden={known ? undefined : "true"}
         >
-        <h1 className="mt-3 text-[40px] font-bold leading-[1.1] text-white drop-shadow-sm">{ev.title}</h1>
-        <p className="mx-auto mt-3 max-w-sm text-[16px] leading-relaxed text-white/85">
-          {ev.tagline}
-        </p>
+          {/* הצללה רכה מאחורי הטקסט בלבד. רדיאלית ובלי שוליים חדים,
+              ולכן היא לא נראית כקופסה ואינה מכהה את שאר התמונה. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1/2 -top-8 bottom-[-18px] w-screen -translate-x-1/2"
+            style={{
+              background:
+                "radial-gradient(58% 78% at 50% 44%, rgba(38,29,23,0.58) 0%, rgba(38,29,23,0.44) 40%, rgba(38,29,23,0.18) 66%, rgba(38,29,23,0) 84%)",
+            }}
+          />
 
-        <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
-          <Pill icon={CalendarDays}>{ev.dateLabel} · {ev.dateShort}</Pill>
-          <Pill icon={Clock}>{ev.time}</Pill>
-          <Pill icon={PlaceIcon}>{ev.place}</Pill>
-        </div>
+          <div className="relative">
+            <h1
+              className="mt-3 text-[40px] font-bold leading-[1.1] text-white"
+              style={{ textShadow: "0 2px 16px rgba(30,22,17,0.6), 0 1px 3px rgba(30,22,17,0.55)" }}
+            >
+              {ev.title}
+            </h1>
+            <p
+              className="mx-auto mt-3 max-w-sm text-[16px] font-medium leading-relaxed text-white"
+              style={{ textShadow: "0 2px 14px rgba(30,22,17,0.72), 0 1px 2px rgba(30,22,17,0.6)" }}
+            >
+              {ev.tagline}
+            </p>
+
+            <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
+              <Pill icon={CalendarDays}>{ev.dateLabel} · {ev.dateShort}</Pill>
+              <Pill icon={Clock}>{ev.time}</Pill>
+              <Pill icon={PlaceIcon}>{ev.place}</Pill>
+            </div>
+          </div>
 
         </div>
 
