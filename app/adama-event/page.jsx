@@ -1,23 +1,23 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
-  MapPin, Navigation,
+  MapPin, Navigation, CalendarPlus, Share2, Backpack,
 } from "lucide-react";
 import {
-  EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventDetails, loadEventPhotos, resolveEvent,
+  EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventDetails, loadEventPhotos, resolveEvent, eventTimes,
 } from "@/lib/crm/eventStore";
 
 // ============================================================================
-//  "ערב משדכים" — דף נחיתה עצמאי.
+//  דף נחיתה עצמאי למפגש המשדכים.
 //
 //  יחידה סגורה: נתיב משלה, אוספים משלה, וקובץ אחד שמכיל את כל הזרימה.
 //  אינה מייבאת דבר מהמערכת חוץ משכבת הנתונים הייעודית שלה, ולכן אינה
 //  יכולה לשבור שום מסך קיים.
 //
 //  שלבי הזרימה:
-//   1. הרשמה לערב      -> נשמרת באוסף event_rsvps.
+//   1. הרשמה למפגש     -> נשמרת באוסף event_rsvps.
 //   2. דף הכנה אישי    -> נשאר במחשב של המשתמש בלבד (Client-side),
 //                          משמש רק ליצירת דף ההדפסה ואינו נשמר בשום מסד נתונים.
 //   3. המלצת חברים     -> רק לאחר ההדפסה. כל חבר נשמר כמסמך נפרד
@@ -28,6 +28,85 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const img = (n) => `${BASE}/assets/event/${n}`;
 
 const EMPTY_ROW = { name: "", phone: "", note: "" };
+
+/* ─────────── עזרי תוכן: טלפון, יומן, שיתוף, ספירה לאחור ─────────── */
+
+// מספר ישראלי תקין: נייד (05X) או קו נייח (02/03/04/08/09/072...).
+// מקבלים גם רווחים, מקפים ו-+972, וקודם מנקים הכול לספרות בלבד.
+export function normalizePhone(raw) {
+  let d = String(raw || "").replace(/[^\d+]/g, "");
+  if (d.startsWith("+972")) d = "0" + d.slice(4);
+  else if (d.startsWith("972")) d = "0" + d.slice(3);
+  return d.replace(/\D/g, "");
+}
+
+export function isIsraeliPhone(raw) {
+  const d = normalizePhone(raw);
+  if (/^05\d{8}$/.test(d)) return true;        // נייד
+  if (/^0(2|3|4|8|9)\d{7}$/.test(d)) return true; // קו נייח
+  if (/^07\d{8}$/.test(d)) return true;        // 072/073/077 וכו'
+  return false;
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+const toUtcStamp = (d) =>
+  `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(
+    d.getUTCMinutes()
+  )}00Z`;
+
+function eventSummary(ev) {
+  const where = ev.mode === "place" ? ev.placeName || ev.place : "בזום";
+  return { title: ev.title, where, details: `${ev.dateLabel} · ${ev.dateShort} · ${ev.time}` };
+}
+
+function googleCalendarUrl(ev, times) {
+  const { title, where } = eventSummary(ev);
+  const p = new URLSearchParams({
+    action: "TEMPLATE",
+    text: title,
+    dates: `${toUtcStamp(times.start)}/${toUtcStamp(times.end)}`,
+    details: ev.tagline || "",
+    location: ev.address || where,
+  });
+  return `https://calendar.google.com/calendar/render?${p.toString()}`;
+}
+
+// קובץ ics להורדה, לאייפון ולכל יומן אחר. נבנה בדפדפן, בלי שום ספרייה.
+function downloadIcs(ev, times) {
+  const { title, where } = eventSummary(ev);
+  const esc = (v) => String(v || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//adama//event//HE",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:${ev.id}@adama`,
+    `DTSTAMP:${toUtcStamp(new Date())}`,
+    `DTSTART:${toUtcStamp(times.start)}`,
+    `DTEND:${toUtcStamp(times.end)}`,
+    `SUMMARY:${esc(title)}`,
+    `DESCRIPTION:${esc(ev.tagline)}`,
+    `LOCATION:${esc(ev.address || where)}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "adama-event.ics";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function shareText(ev) {
+  const { where } = eventSummary(ev);
+  const url = typeof window !== "undefined" ? window.location.href.split("#")[0] : "";
+  return `${ev.title}\n${ev.dateLabel} · ${ev.dateShort} · ${ev.time}\n${where}\n\nנרשמים כאן:\n${url}`;
+}
 
 // זיכרון מקומי בדפדפן של המשתמש בלבד. נשמר רק במכשיר שלו, לא אצלנו
 // ולא במסד הנתונים, ומפתח נפרד לכל אירוע כדי שאירוע חדש יתחיל מאפס.
@@ -118,6 +197,15 @@ export default function AdamaEventPage() {
   // אחרת היא מופיעה בחלון שבין טעינת הפרטים לטעינת התמונות.
   const [photosReady, setPhotosReady] = useState(false);
 
+  // מועדי המפגש, לספירה לאחור ולכפתורי היומן
+  const times = useMemo(() => eventTimes(ev), [ev]);
+
+  // עוגן לכפתור ההרשמה עצמו: הכפתור הדביק בנייד מגלגל אליו ונעלם
+  // ברגע שהוא על המסך. נמדד הכפתור ולא הכרטיס כולו, כי כרטיס גבוה
+  // יכול להישאר "נראה" גם כשהכפתור כבר מתחת לקיפול.
+  const formRef = useRef(null);
+  const [formVisible, setFormVisible] = useState(true);
+
   // ציור מיידי מהעותק המקומי, לפני כל פנייה לרשת
   useBeforePaint(() => {
     const cached = readCache();
@@ -188,6 +276,21 @@ export default function AdamaEventPage() {
       alive = false;
     };
   }, []);
+
+  // מעקב אחרי הטופס, בשביל הכפתור הדביק
+  useEffect(() => {
+    const el = formRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return undefined;
+    const io = new IntersectionObserver((entries) => entries.forEach((e) => setFormVisible(e.isIntersecting)), {
+      rootMargin: "0px 0px -90px 0px",
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ready, step]);
+
+  const scrollToForm = () => {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   const restore = (forEvent) => {
     try {
@@ -267,7 +370,8 @@ export default function AdamaEventPage() {
   const submitRsvp = async () => {
     setErr("");
     if (me.name.trim().length < 2) return setErr("צריך שם מלא");
-    if (me.phone.trim().length < 6) return setErr("צריך מספר טלפון");
+    if (!me.phone.trim()) return setErr("צריך מספר טלפון");
+    if (!isIsraeliPhone(me.phone)) return setErr("מספר הטלפון לא נראה תקין. למשל 050-0000000");
     setBusy(true);
     try {
       setRsvpId(await saveRsvp(me, ev.id));
@@ -325,7 +429,7 @@ export default function AdamaEventPage() {
 
       {/* ====================== המסך (מוסתר בהדפסה) ====================== */}
       <div className="ev-screen">
-        <Hero ev={ev} known={known} photosReady={photosReady} />
+        <Hero ev={ev} known={known} photosReady={photosReady} times={times} />
 
         <main className="mx-auto w-full max-w-xl px-5 pb-24">
           <div
@@ -338,32 +442,73 @@ export default function AdamaEventPage() {
             aria-hidden={ready ? undefined : "true"}
           >
             {step === "rsvp" && (
-              <Card>
-                <Eyebrow icon={CalendarDays}>שריון מקום</Eyebrow>
-                <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">אני מגיע/ה</h2>
-                <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                  שם וטלפון, וזהו. הטלפון נשמר רק כדי שנוכל להגיע אלייך אם משהו משתנה ברגע האחרון.
-                </p>
+              <>
+                <Card>
+                  <div>
+                    <Eyebrow icon={CalendarDays}>שריון מקום</Eyebrow>
+                    <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">אני מגיע/ה</h2>
+                    <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
+                      שם וטלפון, וזהו. הטלפון נשמר רק כדי שנוכל להגיע אלייך אם משהו משתנה ברגע האחרון.
+                    </p>
 
-                <div className="mt-6 space-y-3">
-                  <Field label="שם מלא" value={me.name} onChange={(v) => setMe((m) => ({ ...m, name: v }))} placeholder="איך קוראים לך?" />
-                  <Field label="טלפון" value={me.phone} onChange={(v) => setMe((m) => ({ ...m, phone: v }))} placeholder="050-0000000" type="tel" dir="ltr" />
-                </div>
+                    <div className="mt-6 space-y-3">
+                      <Field
+                        label="שם מלא"
+                        value={me.name}
+                        onChange={(v) => setMe((m) => ({ ...m, name: v }))}
+                        placeholder="איך קוראים לך?"
+                        autoComplete="name"
+                      />
+                      <Field
+                        label="טלפון"
+                        value={me.phone}
+                        onChange={(v) => setMe((m) => ({ ...m, phone: v }))}
+                        placeholder="050-0000000"
+                        type="tel"
+                        dir="ltr"
+                        inputMode="numeric"
+                        autoComplete="tel"
+                      />
+                    </div>
 
-                {err && <ErrorLine>{err}</ErrorLine>}
+                    {err && <ErrorLine>{err}</ErrorLine>}
 
-                <PrimaryButton onClick={submitRsvp} busy={busy}>
-                  אני מגיע/ה <ArrowLeft size={17} />
-                </PrimaryButton>
-              </Card>
+                    <div ref={formRef}>
+                      <PrimaryButton onClick={submitRsvp} busy={busy} busyLabel="שולח...">
+                        אני מגיע/ה <ArrowLeft size={17} />
+                      </PrimaryButton>
+                    </div>
+                  </div>
+
+                  <BringNote ev={ev} />
+                </Card>
+
+                <Reveal>
+                  <Panel>
+                    <Eyebrow icon={MapPin}>הפרטים במקום אחד</Eyebrow>
+                    <p className="mt-2 text-[15px] font-bold leading-relaxed text-[#3A2E26]">
+                      {ev.dateLabel} · {ev.dateShort}
+                    </p>
+                    <p className="text-[15px] leading-relaxed text-[#7C6E60]">
+                      {ev.time} · {ev.mode === "place" ? ev.placeName || ev.place : ev.place}
+                    </p>
+                    {ev.mode === "place" && ev.address && ev.address !== (ev.placeName || "") && (
+                      <p className="mt-0.5 text-[14px] leading-relaxed text-[#A2937F]">{ev.address}</p>
+                    )}
+                    <div className="mt-4">
+                      <ActionButtons ev={ev} times={times} />
+                    </div>
+                  </Panel>
+                </Reveal>
+              </>
             )}
 
             {step === "leads" && (
               <Card>
                 <Eyebrow icon={Sparkles}>שלב שני</Eyebrow>
-                <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה לערב?</h2>
+                <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה למפגש?</h2>
                 <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                  שלושה מועמדים שתרצה/י להציג. השמות האלה נשארים אצלך בלבד — הם משמשים רק
+                  שלושה מועמדים שתרצה/י להציג במפגש. השמות האלה נשארים אצלך בלבד — הם משמשים רק
                   להרכבת דף ההכנה להדפסה, ואינם נשמרים אצלנו בשום מקום.
                 </p>
 
@@ -413,8 +558,11 @@ export default function AdamaEventPage() {
                     <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#DDE6DF]">
                       <Check size={26} className="text-[#4A6552]" strokeWidth={2.4} />
                     </span>
-                    <h2 className="mt-4 text-[26px] font-bold text-[#3A2E26]">נרשמת. נתראה בערב.</h2>
+                    <h2 className="mt-4 text-[26px] font-bold text-[#3A2E26]">נרשמת. איזה כיף שאת/ה בא/ה.</h2>
                     <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
+                      שמרנו לך מקום. {ev.dateLabel} · {ev.dateShort}, {ev.time}, {ev.mode === "place" ? ev.placeName || ev.place : ev.place}.
+                    </p>
+                    <p className="mt-1 text-[15px] leading-relaxed text-[#7C6E60]">
                       {filled > 0
                         ? `דף ההכנה שלך מוכן, עם ${filled} המועמדים שהזנת בפנים.`
                         : "דף ההכנה שלך מוכן להדפסה."}
@@ -423,7 +571,7 @@ export default function AdamaEventPage() {
 
                   <div className="mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5">
                     <Eyebrow icon={ev.mode === "place" ? MapPin : Video}>
-                      {ev.mode === "place" ? "איפה נפגשים" : "הכניסה לערב"}
+                      {ev.mode === "place" ? "איפה נפגשים" : "הכניסה למפגש"}
                     </Eyebrow>
 
                     {ev.mode === "place" ? (
@@ -431,7 +579,7 @@ export default function AdamaEventPage() {
                         <p className="mt-2 text-[15px] font-bold leading-relaxed text-[#3A2E26]">
                           {ev.placeName || ev.place}
                         </p>
-                        {ev.address && (
+                        {ev.address && ev.address !== (ev.placeName || ev.place) && (
                           <p className="mt-0.5 text-[14px] leading-relaxed text-[#7C6E60]">{ev.address}</p>
                         )}
                         {ev.navUrl && (
@@ -448,7 +596,7 @@ export default function AdamaEventPage() {
                     ) : (
                       <>
                         <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
-                          הערב מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
+                          המפגש מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
                         </p>
                         {ev.zoomUrl && (
                           <a
@@ -464,9 +612,15 @@ export default function AdamaEventPage() {
                     )}
                   </div>
 
+                  <div className="mt-5">
+                    <ActionButtons ev={ev} times={times} hideNav />
+                  </div>
+
+                  <BringNote ev={ev} />
+
                   <button
                     onClick={handlePrint}
-                    className="group mt-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[#844442] py-4 text-[16px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(132,68,66,0.75)] transition hover:bg-[#5E2F2D] active:scale-[0.98]"
+                    className="group mt-5 flex min-h-[54px] w-full items-center justify-center gap-2.5 rounded-2xl bg-[#844442] py-4 text-[16px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(132,68,66,0.75)] transition hover:bg-[#5E2F2D] active:scale-[0.98]"
                   >
                     <Printer size={19} className="transition-transform group-hover:-translate-y-0.5" />
                     הדפיסו את דף העבודה שלכם
@@ -579,6 +733,24 @@ export default function AdamaEventPage() {
         </main>
       </div>
 
+      {/* כפתור דביק בנייד: מופיע רק בשלב ההרשמה וכשהטופס אינו על המסך */}
+      <div
+        className="ev-sticky pointer-events-none fixed inset-x-0 bottom-0 z-40 px-4 pb-[max(14px,env(safe-area-inset-bottom))] transition-all duration-300 sm:hidden"
+        style={{
+          opacity: ready && step === "rsvp" && !formVisible ? 1 : 0,
+          transform: ready && step === "rsvp" && !formVisible ? "none" : "translateY(120%)",
+        }}
+        aria-hidden={ready && step === "rsvp" && !formVisible ? undefined : "true"}
+      >
+        <button
+          onClick={scrollToForm}
+          tabIndex={ready && step === "rsvp" && !formVisible ? 0 : -1}
+          className="pointer-events-auto flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-[#844442] text-[17px] font-bold text-white shadow-[0_14px_36px_-10px_rgba(58,46,38,0.6)] transition active:scale-[0.98]"
+        >
+          אני מגיע/ה <ArrowLeft size={18} />
+        </button>
+      </div>
+
       {/* ====================== דף ההדפסה (מוסתר על המסך) ====================== */}
       <PrepSheet rows={rows} owner={me} ev={ev} />
     </div>
@@ -587,7 +759,143 @@ export default function AdamaEventPage() {
 
 /* ───────────────────────── חלקי הדף ───────────────────────── */
 
-function Hero({ ev, known, photosReady }) {
+// הופעה רכה בגלילה. אם הדפדפן אינו תומך, או שהמשתמש ביקש להפחית
+// תנועה, התוכן פשוט מוצג - אף פעם לא נשאר מוסתר.
+function Reveal({ children, className = "" }) {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    let reduced = false;
+    try {
+      reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {}
+    if (reduced || typeof IntersectionObserver === "undefined") {
+      setShown(true);
+      return undefined;
+    }
+    const io = new IntersectionObserver(
+      (entries) => entries.forEach((e) => e.isIntersecting && setShown(true)),
+      { rootMargin: "0px 0px -8% 0px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className={`transition-all duration-500 ease-out ${className}`}
+      style={{ opacity: shown ? 1 : 0, transform: shown ? "none" : "translateY(14px)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ספירה לאחור עדינה. נעלמת לגמרי ברגע שהמפגש התחיל.
+function Countdown({ times }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  if (!times) return null;
+  const left = times.start.getTime() - now;
+  if (left <= 0) return null;
+  const days = Math.floor(left / 86400000);
+  const hours = Math.floor((left % 86400000) / 3600000);
+  const text =
+    days > 0
+      ? `עוד ${days} ${days === 1 ? "יום" : "ימים"}${hours > 0 ? ` ו-${hours} שעות` : ""}`
+      : hours > 0
+      ? `עוד ${hours} ${hours === 1 ? "שעה" : "שעות"}`
+      : "מתחילים עוד מעט";
+  return (
+    <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-black/25 px-3.5 py-1.5 text-[13px] font-semibold text-white backdrop-blur-sm">
+      <Clock size={13} strokeWidth={2.2} /> {text}
+    </p>
+  );
+}
+
+// כפתורי פעולה על המפגש: ניווט, יומן ושיתוף. חוזרים בכמה מקומות בדף.
+function ActionButtons({ ev, times, hideNav }) {
+  const [shared, setShared] = useState(false);
+
+  const share = async () => {
+    const text = shareText(ev);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: ev.title, text });
+        return;
+      }
+    } catch {
+      return; // המשתמש ביטל
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    setShared(true);
+    setTimeout(() => setShared(false), 2000);
+  };
+
+  const base =
+    "flex items-center justify-center gap-1.5 rounded-2xl border px-3 py-3 text-[14px] font-bold transition active:scale-[0.97] min-h-[48px]";
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {!hideNav && ev.navUrl && (
+        <a
+          href={ev.navUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${base} border-[#4E6B56] bg-[#62826B] text-white hover:bg-[#4E6B56]`}
+        >
+          <Navigation size={16} /> נווטו ב-Waze
+        </a>
+      )}
+      {times && (
+        <button
+          onClick={() => downloadIcs(ev, times)}
+          className={`${base} border-[#D9CBB8] bg-white text-[#844442] hover:bg-[#FBF7F1]`}
+        >
+          <CalendarPlus size={16} /> הוסף ליומן
+        </button>
+      )}
+      {times && (
+        <a
+          href={googleCalendarUrl(ev, times)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${base} border-[#D9CBB8] bg-white text-[#844442] hover:bg-[#FBF7F1]`}
+        >
+          <CalendarDays size={16} /> יומן גוגל
+        </a>
+      )}
+      <button
+        onClick={share}
+        className={`${base} border-[#D9CBB8] bg-white text-[#4A6552] hover:bg-[#EFF4EF]`}
+      >
+        <Share2 size={16} /> {shared ? "נפתח וואטסאפ" : "שתפו בוואטסאפ"}
+      </button>
+    </div>
+  );
+}
+
+// מה להביא
+function BringNote({ ev }) {
+  if (!ev.bring) return null;
+  return (
+    <p className="mt-4 flex items-start gap-2 rounded-2xl border border-[#E2D5C4] bg-[#FBF7F1] px-3.5 py-3 text-[14px] leading-relaxed text-[#5E5048]">
+      <Backpack size={16} className="mt-0.5 shrink-0 text-[#A8865A]" />
+      <span>
+        <b className="font-bold text-[#3A2E26]">מה להביא:</b> {ev.bring}
+      </span>
+    </p>
+  );
+}
+
+function Hero({ ev, known, photosReady, times }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
   // כותרת ארוכה יורדת בגודל במקום להישבר לשורות דחוסות.
@@ -635,9 +943,37 @@ function Hero({ ev, known, photosReady }) {
 
   const current = Math.min(slide, Math.max(0, slides.length - 1));
 
+  // עומק עדין: התמונה זזה לאט יותר מהדף בזמן גלילה. מתבצע ב-transform
+  // בלבד, בלי חישוב פריסה מחדש, ומכובה למי שביקש להפחית תנועה.
+  const [shift, setShift] = useState(0);
+  useEffect(() => {
+    let reduced = false;
+    try {
+      reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {}
+    if (reduced) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setShift(Math.min(60, window.scrollY * 0.12));
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   return (
     <header className="relative min-h-[54vh] overflow-hidden">
-      <div className="absolute inset-0 bg-[#B5A590]">
+      <div
+        className="absolute inset-0 bg-[#B5A590] will-change-transform"
+        style={{ transform: `translate3d(0, ${shift}px, 0) scale(1.1)` }}
+      >
         {slides.map((src, n) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -700,6 +1036,8 @@ function Hero({ ev, known, photosReady }) {
               <Pill icon={Clock}>{ev.time}</Pill>
               <Pill icon={PlaceIcon}>{ev.place}</Pill>
             </div>
+
+            <Countdown times={times} />
           </div>
 
         </div>
@@ -761,7 +1099,7 @@ function Eyebrow({ icon: Icon, children }) {
   );
 }
 
-function Field({ label, value, onChange, placeholder, type = "text", dir, compact, area }) {
+function Field({ label, value, onChange, placeholder, type = "text", dir, compact, area, inputMode, autoComplete }) {
   const cls =
     "w-full rounded-2xl border border-[#D9CBB8] bg-white px-4 text-[15px] text-[#3A2E26] outline-none transition placeholder:text-[#BCAC97] focus:border-[#844442] focus:ring-2 focus:ring-[#844442]/15";
   return (
@@ -770,7 +1108,16 @@ function Field({ label, value, onChange, placeholder, type = "text", dir, compac
       {area ? (
         <textarea rows={2} dir={dir} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={`${cls} resize-none py-2.5`} />
       ) : (
-        <input type={type} dir={dir} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={`${cls} ${compact ? "py-2.5" : "py-3"}`} />
+        <input
+          type={type}
+          dir={dir}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${cls} ${compact ? "py-2.5" : "py-3"}`}
+        />
       )}
     </label>
   );
@@ -780,14 +1127,20 @@ function ErrorLine({ children }) {
   return <p className="mt-4 rounded-2xl bg-[#FBEDEC] px-4 py-2.5 text-[13px] font-semibold text-[#C24545]">{children}</p>;
 }
 
-function PrimaryButton({ onClick, busy, disabled, children }) {
+function PrimaryButton({ onClick, busy, disabled, children, busyLabel }) {
   return (
     <button
       onClick={onClick}
       disabled={busy || disabled}
       className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#844442] py-4 text-[16px] font-bold text-white shadow-[0_14px_30px_-12px_rgba(132,68,66,0.7)] transition hover:bg-[#5E2F2D] active:scale-[0.98] disabled:opacity-45 disabled:shadow-none"
     >
-      {busy ? <Loader2 size={18} className="animate-spin" /> : children}
+      {busy ? (
+        <>
+          <Loader2 size={18} className="animate-spin" /> {busyLabel || "רגע..."}
+        </>
+      ) : (
+        children
+      )}
     </button>
   );
 }
@@ -814,6 +1167,7 @@ function PrepSheet({ rows, owner, ev }) {
         </div>
 
         {owner?.name ? <p className="ev-owner">{owner.name}</p> : null}
+        {ev?.bring ? <p className="ev-bring">מה להביא: {ev.bring}</p> : null}
 
         <h2 className="ev-h2">איך מציגים מועמד ב־60 שניות?</h2>
         <ol className="ev-guide">
@@ -835,7 +1189,7 @@ function PrepSheet({ rows, owner, ev }) {
               <th style={{ width: "24%" }}>שם</th>
               <th style={{ width: "20%" }}>טלפון</th>
               <th>שורת המחץ</th>
-              <th style={{ width: "22%" }}>למי זה מתאים? (למילוי בערב)</th>
+              <th style={{ width: "22%" }}>למי זה מתאים? (למילוי במפגש)</th>
             </tr>
           </thead>
           <tbody>
@@ -851,7 +1205,7 @@ function PrepSheet({ rows, owner, ev }) {
           </tbody>
         </table>
 
-        <h2 className="ev-h2">שמות שעלו בערב</h2>
+        <h2 className="ev-h2">שמות שעלו במפגש</h2>
         <table className="ev-table">
           <thead>
             <tr>
@@ -887,7 +1241,8 @@ function PrintStyles() {
       .ev-root .ev-print { display: none; }
 
       @media print {
-        .ev-root .ev-screen { display: none !important; }
+        .ev-root .ev-screen,
+        .ev-root .ev-sticky { display: none !important; }
         .ev-root .ev-print { display: block; }
         .ev-root { background: #fff !important; }
       }
@@ -910,6 +1265,7 @@ function PrintStyles() {
       .ev-when { text-align: left; font-size: 9.5pt; line-height: 1.45; color: #6B5C50; }
       .ev-when p { margin: 0; }
       .ev-owner { margin: 7px 0 0; font-size: 10.5pt; font-weight: 600; color: #3A2E26; }
+      .ev-bring { margin: 3px 0 0; font-size: 9.5pt; color: #6B5C50; }
 
       .ev-h2 {
         margin: 15px 0 7px; font-size: 12pt; font-weight: 700; color: #3A2E26;

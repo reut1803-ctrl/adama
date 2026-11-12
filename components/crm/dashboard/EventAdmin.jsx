@@ -14,7 +14,7 @@ import { compressToDataUrl } from "@/lib/crm/imageCompress";
 import { waDigits } from "@/components/crm/profiles/ProfileCard";
 import { prettyPhone } from "@/components/crm/ui/CopyStaffButton";
 
-// אזור "ערב משדכים" בלוח הבקרה: מי נרשם, ואילו לידים נאספו מהדף.
+// אזור המפגש בלוח הבקרה: מי נרשם, ואילו לידים נאספו מהדף.
 // רכיב עצמאי שקורא אך ורק משני האוספים החדשים.
 
 export default function EventAdmin() {
@@ -122,7 +122,7 @@ export default function EventAdmin() {
 
       <div className="mt-3 flex rounded-2xl border border-[#CCBDAB] bg-[#F5EFE6] p-1">
         {[
-          ["rsvps", "נרשמו לערב", shownRsvps.length, Users],
+          ["rsvps", "נרשמו למפגש", shownRsvps.length, Users],
           ["leads", "לידים חדשים", shownLeads.length, Sparkles],
         ].map(([id, label, n, Icon]) => (
           <button
@@ -190,6 +190,7 @@ export default function EventAdmin() {
 const EMPTY_SETTINGS = {
   title: "",
   tagline: "",
+  bring: "",
   dateLabel: "",
   dateShort: "",
   time: "",
@@ -219,6 +220,7 @@ function EventSettings({ onSaved }) {
       setForm({
         title: base.title,
         tagline: base.tagline,
+        bring: base.bring,
         dateLabel: base.dateLabel,
         dateShort: base.dateShort,
         time: base.time,
@@ -306,7 +308,7 @@ function EventSettings({ onSaved }) {
             <p className="py-6 text-center text-[12.5px] text-[#7C6E60]">טוען…</p>
           ) : (
             <>
-              <SField label="שם האירוע" value={form.title} onChange={(v) => set({ title: v })} placeholder="ערב משדכים" />
+              <SField label="שם האירוע" value={form.title} onChange={(v) => set({ title: v })} placeholder="נפגשים לשדך" />
 
               <SField
                 label="משפט הפתיחה"
@@ -314,6 +316,13 @@ function EventSettings({ onSaved }) {
                 onChange={(v) => set({ tagline: v })}
                 placeholder="המשפט שמופיע מתחת לשם האירוע"
                 area
+              />
+
+              <SField
+                label="מה להביא"
+                value={form.bring}
+                onChange={(v) => set({ bring: v })}
+                placeholder="חיוך, אמונה בלב ודף ההכנה מודפס"
               />
 
               <div className="mt-2.5 grid grid-cols-2 gap-2">
