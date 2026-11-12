@@ -49,14 +49,19 @@ function readCache() {
 }
 
 function writeCache(ev) {
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(ev));
-    return;
-  } catch {}
-  // אין מקום לתמונות: שומרים לפחות את הטקסט
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify({ ...ev, heroImage: "", gallery: [] }));
-  } catch {}
+  // שלוש רמות, מהשלמה לדלילה. חשוב שהתמונה הראשית תישמר גם כשאין מקום
+  // לכולן: היא זו שמצוירת ראשונה בביקור הבא.
+  const tries = [
+    ev,
+    { ...ev, gallery: [] },
+    { ...ev, heroImage: "", gallery: [] },
+  ];
+  for (const attempt of tries) {
+    try {
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify(attempt));
+      return;
+    } catch {}
+  }
 }
 
 // useLayoutEffect רץ לפני הציור, ולכן העותק המקומי נכנס בלי הבהוב.
@@ -109,6 +114,9 @@ export default function AdamaEventPage() {
   // known = יש לנו פרטי אירוע אמיתיים להציג. עד אז לא מציירים את
   // הכותרת והתגיות, כדי שלא יופיע לרגע אירוע ישן ואז יתחלף.
   const [known, setKnown] = useState(false);
+  // photosReady = התמונות כבר נבדקו. רק אז מותר ליפול לתמונה המובנית,
+  // אחרת היא מופיעה בחלון שבין טעינת הפרטים לטעינת התמונות.
+  const [photosReady, setPhotosReady] = useState(false);
 
   // ציור מיידי מהעותק המקומי, לפני כל פנייה לרשת
   useBeforePaint(() => {
@@ -116,6 +124,7 @@ export default function AdamaEventPage() {
     if (!cached) return;
     setEv(cached);
     setKnown(true);
+    if (cached.heroImage || (cached.gallery || []).length) setPhotosReady(true);
     restore(cached);
     setReady(true);
   }, []);
@@ -168,7 +177,9 @@ export default function AdamaEventPage() {
 
       // שלב שני: התמונות נכנסות אל הרקע כשהן מוכנות
       const photos = await photosPromise;
-      if (!alive || !ok) return;
+      if (!alive) return;
+      setPhotosReady(true);
+      if (!ok) return;
       const withPhotos = resolveEvent(settings, photos);
       setEv(withPhotos);
       writeCache(withPhotos);
@@ -314,7 +325,7 @@ export default function AdamaEventPage() {
 
       {/* ====================== המסך (מוסתר בהדפסה) ====================== */}
       <div className="ev-screen">
-        <Hero ev={ev} known={known} />
+        <Hero ev={ev} known={known} photosReady={photosReady} />
 
         <main className="mx-auto w-full max-w-xl px-5 pb-24">
           <div
@@ -576,7 +587,7 @@ export default function AdamaEventPage() {
 
 /* ───────────────────────── חלקי הדף ───────────────────────── */
 
-function Hero({ ev, known }) {
+function Hero({ ev, known, photosReady }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
   // כותרת ארוכה יורדת בגודל במקום להישבר לשורות דחוסות.
@@ -588,13 +599,21 @@ function Hero({ ev, known }) {
     : titleLen > 18 ? "text-[34px] leading-[1.15]"
     : "text-[40px] leading-[1.1]";
 
-  // כל התמונות שהועלו, לפי הסדר. אם אין אף אחת - התמונה המובנית.
+  // כל התמונות שהועלו, לפי הסדר.
+  //
+  // כל עוד לא ידוע מה האירוע הפעיל לא מציגים שום תמונה. התמונה המובנית
+  // היא התמונה של האירוע הראשון, ואם מציירים אותה בזמן הטעינה היא
+  // נראית לרגע כמו האירוע הקודם ואז מתחלפת. עדיף רקע נקי עד שיודעים.
+  //
   // חתימה יציבה: אותן תמונות בדיוק = אותה רשימה, ולכן הקרוסלה אינה
   // מתאפסת כשפרטי האירוע נטענים מחדש מהשרת ומחליפים את העותק המקומי.
-  const sig = `${ev.heroImage ? ev.heroImage.length : 0}|${(ev.gallery || []).map((g) => g.length).join(",")}`;
+  const sig = `${known ? 1 : 0}|${photosReady ? 1 : 0}|${ev.heroImage ? ev.heroImage.length : 0}|${(ev.gallery || []).map((g) => g.length).join(",")}`;
   const slides = useMemo(() => {
     const all = [ev.heroImage, ...(ev.gallery || [])].filter(Boolean);
-    return all.length ? all : [img("shepherd.jpg")];
+    if (all.length) return all;
+    // אין תמונות שהועלו: נופלים לתמונה המובנית, אבל רק אחרי שידוע
+    // שזה באמת המצב ולא רק שעוד לא נטען
+    return known && photosReady ? [img("shepherd.jpg")] : [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
@@ -614,11 +633,11 @@ function Hero({ ev, known }) {
     return () => clearInterval(t);
   }, [slides]);
 
-  const current = Math.min(slide, slides.length - 1);
+  const current = Math.min(slide, Math.max(0, slides.length - 1));
 
   return (
     <header className="relative min-h-[54vh] overflow-hidden">
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 bg-[#B5A590]">
         {slides.map((src, n) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img
