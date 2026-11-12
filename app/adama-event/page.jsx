@@ -94,12 +94,25 @@ function downloadIcs(ev, times) {
   const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
+
+  // ספארי בטלפון לא תמיד מוריד קבצים, ושם עדיף לפתוח את הקובץ עצמו -
+  // אייפון מזהה אותו כאירוע ומציע להוסיף ליומן.
+  const iOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  if (iOS || typeof a.download === "undefined") {
+    window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    return;
+  }
+
   a.href = url;
   a.download = "adama-event.ics";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
 
 function shareText(ev) {
@@ -170,6 +183,9 @@ export default function AdamaEventPage() {
   const [leaving, setLeaving] = useState(false);
   const [me, setMe] = useState({ name: "", phone: "" });
   const [rsvpId, setRsvpId] = useState(null);
+  // הפרטים שכבר נרשמו בפועל מהמכשיר הזה. אם לוחצים שוב על אותם
+  // פרטים בדיוק, אין טעם ליצור רישום כפול במאגר.
+  const [savedMe, setSavedMe] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -292,22 +308,24 @@ export default function AdamaEventPage() {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  // שחזור.
+  //
+  // כלל ברזל: מי שנכנס לקישור נוחת תמיד במסך הפתיחה ובטופס שריון המקום.
+  // לא בטבלאות, לא בדף ההדפסה ולא בשלב שבו היה בפעם הקודמת. מה שכן
+  // נשמר הוא מה שהוקלד - השם, הטלפון והמועמדים - כדי שלא יאבד,
+  // והטופס פשוט מגיע מלא מראש.
   const restore = (forEvent) => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(storageKey(forEvent)) || "null");
       // שחזור רק אם הרשומה שייכת בוודאות לאירוע הנוכחי
       if (saved && typeof saved === "object" && (!saved.evId || saved.evId === forEvent.id)) {
-        if (saved.step === "leads" || saved.step === "done") setStep(saved.step);
         if (saved.me) setMe({ name: saved.me.name || "", phone: saved.me.phone || "" });
+        if (saved.savedMe) setSavedMe(saved.savedMe);
         if (saved.rsvpId) setRsvpId(saved.rsvpId);
         if (Array.isArray(saved.rows) && saved.rows.length) {
           setRows(saved.rows.map((r) => ({ name: r?.name || "", phone: r?.phone || "", note: r?.note || "" })));
         }
         if (saved.printed) setPrinted(true);
-        if (saved.refDone) {
-          setRefDone(true);
-          setRefSaved(Number(saved.refSaved) || 0);
-        }
       }
     } catch {
       // גלישה פרטית או חסימת אחסון - פשוט מתחילים רגיל
@@ -321,16 +339,17 @@ export default function AdamaEventPage() {
     try {
       window.localStorage.setItem(
         storageKey(ev),
-        JSON.stringify({ evId: ev.id, step, me, rsvpId, rows, printed, refDone, refSaved })
+        JSON.stringify({ evId: ev.id, me, savedMe, rsvpId, rows, printed })
       );
     } catch {}
-  }, [ready, trusted, ev, step, me, rsvpId, rows, printed, refDone, refSaved]);
+  }, [ready, trusted, ev, me, savedMe, rsvpId, rows, printed]);
 
   // איפוס כל שדות הזרימה למצב התחלתי
   const resetFlow = () => {
     setStep("rsvp");
     setMe({ name: "", phone: "" });
     setRsvpId(null);
+    setSavedMe(null);
     setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
     setPrinted(false);
     setFriends([{ ...EMPTY_ROW }]);
@@ -347,6 +366,7 @@ export default function AdamaEventPage() {
     } catch {}
     setMe({ name: "", phone: "" });
     setRsvpId(null);
+    setSavedMe(null);
     setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
     setPrinted(false);
     setFriends([{ ...EMPTY_ROW }]);
@@ -372,9 +392,17 @@ export default function AdamaEventPage() {
     if (me.name.trim().length < 2) return setErr("צריך שם מלא");
     if (!me.phone.trim()) return setErr("צריך מספר טלפון");
     if (!isIsraeliPhone(me.phone)) return setErr("מספר הטלפון לא נראה תקין. למשל 050-0000000");
+    const same =
+      savedMe && rsvpId && savedMe.name === me.name.trim() && savedMe.phone === me.phone.trim();
+    if (same) {
+      // כבר נרשמנו מהמכשיר הזה עם בדיוק אותם פרטים
+      goTo("leads");
+      return;
+    }
     setBusy(true);
     try {
       setRsvpId(await saveRsvp(me, ev.id));
+      setSavedMe({ name: me.name.trim(), phone: me.phone.trim() });
       goTo("leads");
     } catch {
       setErr("ההרשמה לא נשמרה. אפשר לנסות שוב בעוד רגע.");
@@ -831,8 +859,10 @@ function ActionButtons({ ev, times, hideNav }) {
         await navigator.share({ title: ev.title, text });
         return;
       }
-    } catch {
-      return; // המשתמש ביטל
+    } catch (e) {
+      // ביטול של המשתמש הוא לא תקלה. כל שגיאה אחרת - ממשיכים לוואטסאפ,
+      // כדי שהכפתור אף פעם לא ייראה כאילו הוא לא עושה כלום.
+      if (e && e.name === "AbortError") return;
     }
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
     setShared(true);
@@ -991,13 +1021,16 @@ function Hero({ ev, known, photosReady, times }) {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(to bottom, rgba(42,32,26,0.82) 0%, rgba(42,32,26,0.66) 26%, rgba(42,32,26,0.46) 46%, rgba(42,32,26,0.26) 62%, rgba(245,239,230,0.30) 80%, rgba(245,239,230,0.86) 93%, #F5EFE6 100%)",
+              // שכבה אחת, אחידה: בלי פס כהה בראש הדף ובלי ערפל באמצע.
+              // ההכהיה שווה לאורך התמונה, והמעבר אל צבע הדף קצר ויושב
+              // רק בתחתית, כדי שהתמונה תיגמר נקי במקום להימרח.
+              "linear-gradient(to bottom, rgba(245,239,230,0) 80%, rgba(245,239,230,0.55) 92%, #F5EFE6 100%)," +
+              "linear-gradient(to bottom, rgba(42,32,26,0.46) 0%, rgba(42,32,26,0.44) 40%, rgba(42,32,26,0.32) 74%, rgba(42,32,26,0.24) 100%)",
           }}
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-14 text-center">
-        <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
+      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-16 text-center">
 
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
             כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
@@ -1019,7 +1052,7 @@ function Hero({ ev, known, photosReady, times }) {
 
           <div className="relative">
             <h1
-              className={`mx-auto mt-3 max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
+              className={`mx-auto max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
               style={{ textShadow: "0 2px 16px rgba(30,22,17,0.6), 0 1px 3px rgba(30,22,17,0.55)" }}
             >
               {ev.title}
