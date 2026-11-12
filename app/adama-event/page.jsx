@@ -636,14 +636,12 @@ function Hero({ ev, known }) {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(to bottom, rgba(42,32,26,0.82) 0%, rgba(42,32,26,0.66) 26%, rgba(42,32,26,0.46) 46%, rgba(42,32,26,0.26) 62%, rgba(245,239,230,0.30) 80%, rgba(245,239,230,0.86) 93%, #F5EFE6 100%)",
+              "linear-gradient(to bottom, rgba(42,32,26,0.40) 0%, rgba(42,32,26,0.45) 24%, rgba(42,32,26,0.43) 46%, rgba(42,32,26,0.26) 62%, rgba(245,239,230,0.30) 80%, rgba(245,239,230,0.86) 93%, #F5EFE6 100%)",
           }}
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-14 text-center">
-        <p className="text-[13px] font-semibold tracking-[0.22em] text-[#E6CF9F]">א ד מ ה</p>
-
+      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-16 text-center">
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
             כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
         <div
@@ -664,7 +662,7 @@ function Hero({ ev, known }) {
 
           <div className="relative">
             <h1
-              className={`mx-auto mt-3 max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
+              className={`mx-auto max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
               style={{ textShadow: "0 2px 16px rgba(30,22,17,0.6), 0 1px 3px rgba(30,22,17,0.55)" }}
             >
               {ev.title}
