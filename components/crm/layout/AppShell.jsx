@@ -18,6 +18,7 @@ export default function AppShell({ children }) {
   const authLoading = useCrmStore((s) => s.authLoading);
   const role = useCrmStore((s) => s.role);
   const allowlistLoaded = useCrmStore((s) => s.allowlistLoaded);
+  const allowlistError = useCrmStore((s) => s.allowlistError);
   useScrollRestoration(scrollRef);
 
   useEffect(() => {
@@ -28,6 +29,10 @@ export default function AppShell({ children }) {
   if (!googleUser) return <SignInGate />;
   // מציגים את מסך "אין הרשאה" רק אחרי שרשימת ההרשאות נבדקה מול השרת,
   // כדי שאיש/אשת צוות מאושר/ת לא יראה/תראה אותו להרף עין בזמן הטעינה.
+  // בדיקה שנכשלה אינה "אין הרשאה": מציגים מסך אחר, עם בדיקה חוזרת,
+  // כדי שאיש/אשת צוות מאושר/ת לא יקבל/תקבל הודעה שגויה.
+  if (allowlistLoaded && allowlistError && role !== "admin" && role !== "staff")
+    return <AccessDeniedGate reason="checkFailed" />;
   if (allowlistLoaded && role === "unauthorized") return <AccessDeniedGate />;
 
   return (
