@@ -12,8 +12,8 @@
 import { useMemo, useState } from "react";
 import { Loader2, Plus } from "lucide-react";
 import SearchableSelect from "@/components/crm/ui/SearchableSelect";
-import { useCrmStore } from "@/lib/crm/store";
-import { pastProposalsForPair } from "@/lib/crm/attention";
+import { useCrmStore, PROPOSAL_STAGES, PROPOSAL_DROPPED } from "@/lib/crm/store";
+import { pairHistory } from "@/lib/crm/attention";
 
 export default function ManualHistoryEntry() {
   const allCandidates = useCrmStore((s) => s.allCandidates);
@@ -38,7 +38,9 @@ export default function ManualHistoryEntry() {
   const [err, setErr] = useState("");
 
   // הזוג כבר מוכר למערכת. אין טעם ברשומה שנייה: ההתראה כבר תעבוד.
-  const alreadyKnown = Boolean(male && female && pastProposalsForPair(proposals, male, female).length > 0);
+  const alreadyKnown = Boolean(
+    male && female && pairHistory(proposals, male, female, PROPOSAL_DROPPED, PROPOSAL_STAGES).all.length > 0
+  );
   const ready = Boolean(male && female) && !alreadyKnown;
 
   const save = async () => {

@@ -6,12 +6,12 @@ import { Heart, AlertTriangle, X } from "lucide-react";
 import Button from "@/components/crm/ui/Button";
 import SearchableSelect from "@/components/crm/ui/SearchableSelect";
 import ExternalCandidatePanel from "@/components/crm/proposals/ExternalCandidatePanel";
-import { isOnActiveBoard, lastDropInfo, pastProposalsForPair, toMillis } from "@/lib/crm/attention";
+import { isOnActiveBoard, lastDropInfo, pairHistory, toMillis } from "@/lib/crm/attention";
 import ProposalCard from "@/components/crm/proposals/ProposalCard";
 import DroppedArchive from "@/components/crm/proposals/DroppedArchive";
 import FrozenShelf from "@/components/crm/proposals/FrozenShelf";
 import ConfirmDialog from "@/components/crm/ui/ConfirmDialog";
-import { useCrmStore, PROPOSAL_DROPPED, PROPOSAL_FROZEN } from "@/lib/crm/store";
+import { useCrmStore, PROPOSAL_STAGES, PROPOSAL_DROPPED, PROPOSAL_FROZEN } from "@/lib/crm/store";
 
 // מזהה הבחירה "מישהו מהמעגל שלי". יושב כאן ולא בתוך הרכיב, כדי שיהיה
 // זמין גם לחישוב שרץ לפני בדיקת ההרשאה.
@@ -52,56 +52,52 @@ export default function ProposalsPage() {
 
   // התראת הכפילות.
   //
-  // קודם היא נגזרה ישירות מהבחירה הנוכחית, ולכן ברגע שההצעה הוקמה
-  // הבחירה התנקתה וההתראה נעלמה מעצמה - לפני שהספיקו לקרוא אותה.
-  // עכשיו היא נשמרת במצב משלה ויורדת מהמסך רק בשתי דרכים: סגירה ידנית,
-  // או בחירת זוג אחר שאין בו היסטוריה. אין כאן שום מונה זמן.
+  // כלל יחיד: ההתראה שייכת לזוג שלם ומסוים אחד, ומוצגת אך ורק כאשר
+  // שני הצדדים שנבחרים כרגע הם בדיוק אותו זוג. בחירה חלקית או ריקה
+  // מורידה אותה מיד.
+  //
+  // קודם בחירה ריקה נחשבה "לא סותרת", ולכן אחרי הקמת הצעה - שמנקה את
+  // הבחירה - ההתראה נשארה על המסך והוצגה לצד זוג חדש לגמרי שמרכיבים.
+  // זו הייתה התראת השווא. מי שמרכיב זוג רואה את ההתראה ברגע שבחר את
+  // שני הצדדים, ושוב בחלון האישור שלפני ההקמה.
   const [duplicateNotice, setDuplicateNotice] = useState(null);
   const [dismissedPair, setDismissedPair] = useState("");
 
   useEffect(() => {
     const { male, female } = selection;
 
-    // ההתראה שייכת לזוג מסוים אחד, ולכן היא יורדת מהמסך ברגע שצד שנבחר
-    // עכשיו סותר את הזוג שהיא מתארת.
-    //
-    // בלי הבדיקה הזו התראה של זוג קודם נשארה על המסך בזמן שמרכיבים זוג
-    // חדש לגמרי, והציגה תאריך של הצעה שאין לה שום קשר לשני האנשים
-    // שנבחרו - אזעקת שווא.
-    //
-    // בחירה ריקה אינה סתירה. זה בדיוק המצב שמיד אחרי ההקמה, ושם ההתראה
-    // חייבת להישאר עד שסוגרים אותה ידנית או מתחילים זוג אחר.
-    setDuplicateNotice((prev) => {
-      if (!prev) return prev;
-      const contradicts = (side, belongsTo) => !!side && side !== belongsTo;
-      return contradicts(male, prev.male) || contradicts(female, prev.female) ? null : prev;
-    });
-
-    if (!male || !female || male === EXTERNAL || female === EXTERNAL) return;
+    // רק זוג שלם ומזוהה משני צדדיו נבדק. כרטיס מקוצר אינו רשומה במאגר
+    // ולכן אין מולו היסטוריה לבדוק.
+    const complete = !!male && !!female && male !== EXTERNAL && female !== EXTERNAL;
+    if (!complete) {
+      setDuplicateNotice(null);
+      return;
+    }
 
     const pairKey = `${male}|${female}`;
-    // הזוג הזה נסגר ידנית - לא מציגים עליו התראה, וגם לא משאירים התראה
-    // קודמת תלויה על המסך.
     if (pairKey === dismissedPair) {
       setDuplicateNotice(null);
       return;
     }
 
-    const past = pastProposalsForPair(proposals, male, female);
-    if (past.length === 0) {
+    const history = pairHistory(proposals, male, female, PROPOSAL_DROPPED, PROPOSAL_STAGES);
+    if (history.all.length === 0) {
       setDuplicateNotice(null);
       return;
     }
-    const dropped = past.filter((x) => x.status === PROPOSAL_DROPPED);
+
+    // ההודעה מתארת את מה שבאמת קיים: פעילה, ירדה מהפרק, או מוקפאת.
+    // קודם כל מה שלא ירד מהפרק הוצג כ"הצעה פעילה", כולל הצעה מוקפאת.
+    const kind = history.active.length > 0 ? "active" : history.dropped.length > 0 ? "dropped" : "frozen";
+    const source = (kind === "active" ? history.active : kind === "dropped" ? history.dropped : history.frozen)[0];
+
     setDuplicateNotice({
       pairKey,
-      // שני הצדדים נשמרים בנפרד, כדי שאפשר יהיה להצליב כל צד לחוד מול
-      // הבחירה הנוכחית ולא רק את המפתח המחובר.
       male,
       female,
-      isDropped: dropped.length > 0,
-      dateMs: toMillis((dropped[0] || past[0]).createdAt),
-      rationale: dropped.length > 0 ? lastDropInfo(dropped[0], PROPOSAL_DROPPED)?.rationale || "" : "",
+      kind,
+      dateMs: toMillis(source.createdAt),
+      rationale: kind === "dropped" ? lastDropInfo(source, PROPOSAL_DROPPED)?.rationale || "" : "",
     });
   }, [selection, proposals, dismissedPair]);
 
@@ -145,18 +141,18 @@ export default function ProposalsPage() {
     (p) => !isOnActiveBoard(p, PROPOSAL_DROPPED) && p.status !== PROPOSAL_FROZEN
   );
 
-  // חגורת ביטחון שנייה להתראת הכפילות: גם אם משהו ישתנה בעתיד בלוגיקה
-  // שלמעלה, ההתראה לעולם לא תוצג לצד זוג שסותר אותה. בחירה ריקה אינה
-  // סתירה, ולכן ההתראה שורדת את ניקוי הבחירה שאחרי ההקמה.
+  // חגורת ביטחון שנייה: ההתראה מוצגת אך ורק כששני הצדדים שנבחרים כרגע
+  // הם בדיוק הזוג שעליו היא נכתבה. בחירה ריקה או חלקית אינה התאמה.
   const noticeMatchesSelection =
     !!duplicateNotice &&
-    (!selection.male || selection.male === duplicateNotice.male) &&
-    (!selection.female || selection.female === duplicateNotice.female);
+    selection.male === duplicateNotice.male &&
+    selection.female === duplicateNotice.female;
 
-  // התראת כפילות: נבדקת מול כל ההיסטוריה, כולל הצעות שכבר אינן מוצגות
+  // אותה בדיקה בדיוק שמשמשת את ההתראה, ולכן חלון האישור וההתראה
+  // לעולם אינם חלוקים ביניהם.
   const pastForSelection =
     selection.male && selection.female && selection.male !== EXTERNAL && selection.female !== EXTERNAL
-      ? pastProposalsForPair(proposals, selection.male, selection.female)
+      ? pairHistory(proposals, selection.male, selection.female, PROPOSAL_DROPPED, PROPOSAL_STAGES).all
       : [];
 
   return (
@@ -250,8 +246,12 @@ export default function ProposalsPage() {
           <div className="min-w-0 flex-1 text-[12px] leading-relaxed text-[#7A5A18]">
             <p className="font-bold">שימו לב - ההתאמה הזו כבר עלתה בעבר</p>
             <p className="mt-0.5">
-              {duplicateNotice.isDropped
+              {duplicateNotice.kind === "dropped"
                 ? `הצעה בין השניים האלה כבר הוצעה וירדה מהפרק (${new Date(
+                    duplicateNotice.dateMs
+                  ).toLocaleDateString("he-IL")}).`
+                : duplicateNotice.kind === "frozen"
+                ? `קיימת ביניהם הצעה מוקפאת (${new Date(
                     duplicateNotice.dateMs
                   ).toLocaleDateString("he-IL")}).`
                 : `קיימת כבר הצעה פעילה בין השניים האלה (${new Date(
@@ -260,7 +260,7 @@ export default function ProposalsPage() {
               {" "}
               אפשר להמשיך ולהציע שוב, אבל המערכת תבקש אישור לפני ההקמה.
             </p>
-            {duplicateNotice.isDropped && duplicateNotice.rationale && (
+            {duplicateNotice.kind === "dropped" && duplicateNotice.rationale && (
               <p className="mt-1">
                 הרציונל שנכתב אז: <span className="font-semibold">{duplicateNotice.rationale}</span>
               </p>
