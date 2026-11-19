@@ -1070,10 +1070,22 @@ function Hero({ ev, known, photosReady, times }) {
       </div>
 
       <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-12 text-center">
-        {/* הלוגו של אדמה. מצויר מיד, עוד לפני שפרטי המפגש ידועים. */}
-        <span className="mx-auto mb-6 flex h-[74px] w-[74px] items-center justify-center overflow-hidden rounded-[26px] bg-white/95 shadow-[0_14px_34px_-12px_rgba(20,14,10,0.8)] ring-1 ring-white/40">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={`${BASE}/icons/icon-192.png`} alt="אדמה" className="h-full w-full object-cover" />
+        {/* הלוגו של אדמה, בזהב של העיצוב המודפס של המפגש.
+            מצויר מיד, עוד לפני שפרטי המפגש ידועים. */}
+        <span className="mx-auto mb-6 flex w-fit flex-col items-center">
+          <span
+            className="text-[34px] font-bold leading-none text-[#DEB86E]"
+            style={{
+              letterSpacing: "0.14em",
+              // הריווח בין האותיות מוסיף רווח אחרי האות האחרונה, ובעברית
+              // הוא נופל משמאל. ריפוד זהה מימין מחזיר את המילה למרכז.
+              paddingInlineStart: "0.14em",
+              textShadow: "0 2px 18px rgba(26,18,12,0.75), 0 1px 3px rgba(26,18,12,0.65)",
+            }}
+          >
+            אדמה
+          </span>
+          <span aria-hidden="true" className="mt-2.5 h-px w-14 bg-[#DEB86E]/70" />
         </span>
 
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
