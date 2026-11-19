@@ -27,7 +27,38 @@ import {
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const img = (n) => `${BASE}/assets/event/${n}`;
 
+// שלב 3 (המלצת חברים) נשמר במאגר ולכן מבנה השדות שלו אינו משתנה.
 const EMPTY_ROW = { name: "", phone: "", note: "" };
+
+// שלב 2: תיאור מלא של מועמד/ת, לדף ההכנה המודפס בלבד. אינו נשמר בשום מקום.
+// במקום "שורת מחץ" אחת שקשה לנסח - שאלות מכוונות, אחת אחת.
+const CANDIDATE_QUESTIONS = [
+  { key: "occupation", label: "מה הוא/היא עושה בחיים", placeholder: "עיסוק, לימודים, מה ממלא את היום" },
+  { key: "appreciate", label: "מה אנחנו מעריכים בו/בה", placeholder: "התכונה שגורמת לך לכבד אותו/ה" },
+  { key: "fun", label: "מה כיף בו/בה", placeholder: "מה עושה את הזמן איתו/ה נעים" },
+  { key: "comfort", label: "אילו תכונות יפתחו אותו/ה ויתנו לו/לה להרגיש בנוח", placeholder: "מה הוא/היא צריך/ה מהצד השני" },
+  { key: "succeed", label: "בזכות אילו תכונות יצליח/תצליח בקשר", placeholder: "מה הוא/היא מביא/ה לזוגיות" },
+  { key: "brings", label: "מה הכי מביא לקשר", placeholder: "הדבר האחד שאי אפשר לוותר עליו" },
+];
+
+const EMPTY_CANDIDATE = {
+  name: "",
+  age: "",
+  phone: "",
+  ...Object.fromEntries(CANDIDATE_QUESTIONS.map((q) => [q.key, ""])),
+};
+
+// רשומה שנשמרה בדפדפן לפני השינוי הזה נשאה "note" בודד. היא נטענת
+// לשדה הראשון במקום להיאבד.
+const normalizeCandidate = (r) => ({
+  ...EMPTY_CANDIDATE,
+  ...Object.fromEntries(
+    Object.keys(EMPTY_CANDIDATE).map((k) => [k, typeof r?.[k] === "string" ? r[k] : ""])
+  ),
+  appreciate: typeof r?.appreciate === "string" && r.appreciate ? r.appreciate : String(r?.note || ""),
+});
+
+const hasCandidate = (r) => String(r?.name || "").trim().length >= 2;
 
 /* ─────────── עזרי תוכן: טלפון, יומן, שיתוף, ספירה לאחור ─────────── */
 
@@ -190,7 +221,7 @@ export default function AdamaEventPage() {
   const [err, setErr] = useState("");
 
   // שלב 2 — הכנה אישית בלבד. נשאר בזיכרון הדפדפן ולא נשמר בשום מקום.
-  const [rows, setRows] = useState([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+  const [rows, setRows] = useState([{ ...EMPTY_CANDIDATE }]);
 
   // שלב 3 — המלצת חברים למאגר. נפתח רק אחרי ההדפסה.
   const [printed, setPrinted] = useState(false);
@@ -323,7 +354,7 @@ export default function AdamaEventPage() {
         if (saved.savedMe) setSavedMe(saved.savedMe);
         if (saved.rsvpId) setRsvpId(saved.rsvpId);
         if (Array.isArray(saved.rows) && saved.rows.length) {
-          setRows(saved.rows.map((r) => ({ name: r?.name || "", phone: r?.phone || "", note: r?.note || "" })));
+          setRows(saved.rows.map(normalizeCandidate));
         }
         if (saved.printed) setPrinted(true);
       }
@@ -350,7 +381,7 @@ export default function AdamaEventPage() {
     setMe({ name: "", phone: "" });
     setRsvpId(null);
     setSavedMe(null);
-    setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+    setRows([{ ...EMPTY_CANDIDATE }]);
     setPrinted(false);
     setFriends([{ ...EMPTY_ROW }]);
     setRefDone(false);
@@ -367,7 +398,7 @@ export default function AdamaEventPage() {
     setMe({ name: "", phone: "" });
     setRsvpId(null);
     setSavedMe(null);
-    setRows([{ ...EMPTY_ROW }, { ...EMPTY_ROW }, { ...EMPTY_ROW }]);
+    setRows([{ ...EMPTY_CANDIDATE }]);
     setPrinted(false);
     setFriends([{ ...EMPTY_ROW }]);
     setRefDone(false);
@@ -411,7 +442,8 @@ export default function AdamaEventPage() {
     }
   };
 
-  const filled = rows.filter((r) => r.name.trim().length >= 2).length;
+  const filled = rows.filter(hasCandidate).length;
+  const addRow = () => setRows((rs) => [...rs, { ...EMPTY_CANDIDATE }]);
 
   // שלב 2 אינו שומר שום דבר. הנתונים נשארים בזיכרון הדפדפן ומשמשים
   // אך ורק להרכבת דף ההדפסה האישי של המשתמש.
@@ -508,25 +540,10 @@ export default function AdamaEventPage() {
                     </div>
                   </div>
 
-                  <BringNote ev={ev} />
                 </Card>
 
                 <Reveal>
-                  <Panel>
-                    <Eyebrow icon={MapPin}>הפרטים במקום אחד</Eyebrow>
-                    <p className="mt-2 text-[15px] font-bold leading-relaxed text-[#3A2E26]">
-                      {ev.dateLabel} · {ev.dateShort}
-                    </p>
-                    <p className="text-[15px] leading-relaxed text-[#7C6E60]">
-                      {ev.time} · {ev.mode === "place" ? ev.placeName || ev.place : ev.place}
-                    </p>
-                    {ev.mode === "place" && ev.address && ev.address !== (ev.placeName || "") && (
-                      <p className="mt-0.5 text-[14px] leading-relaxed text-[#A2937F]">{ev.address}</p>
-                    )}
-                    <div className="mt-4">
-                      <ActionButtons ev={ev} times={times} />
-                    </div>
-                  </Panel>
+                  <EventDetails ev={ev} times={times} />
                 </Reveal>
               </>
             )}
@@ -536,37 +553,62 @@ export default function AdamaEventPage() {
                 <Eyebrow icon={Sparkles}>שלב שני</Eyebrow>
                 <h2 className="mt-2 text-[26px] font-bold leading-tight text-[#3A2E26]">מי את/ה מביא/ה למפגש?</h2>
                 <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                  שלושה מועמדים שתרצה/י להציג במפגש. השמות האלה נשארים אצלך בלבד — הם משמשים רק
-                  להרכבת דף ההכנה להדפסה, ואינם נשמרים אצלנו בשום מקום.
+                  ככל שנדע עליו/ה יותר, כך קל יותר לחבר. התשובות נשארות אצלך בלבד —
+                  הן בונות את דף ההכנה שתדפיס/י, ואינן נשמרות אצלנו בשום מקום.
                 </p>
 
                 <div className="mt-6 space-y-5">
                   {rows.map((r, i) => (
                     <div key={i} className="rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-4">
                       <div className="mb-3 flex items-center gap-2">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#844442] text-[13px] font-bold text-white">{i + 1}</span>
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#844442] text-[13px] font-bold text-white">
+                          {i + 1}
+                        </span>
                         <span className="text-[13px] font-semibold text-[#7C6E60]">מועמד/ת {i + 1}</span>
                       </div>
+
                       <div className="space-y-2.5">
-                        <Field label="שם" value={r.name} onChange={(v) => setRow(i, { name: v })} placeholder="שם מלא" compact />
-                        <Field label="טלפון" value={r.phone} onChange={(v) => setRow(i, { phone: v })} placeholder="050-0000000" type="tel" dir="ltr" compact />
-                        <Field
-                          label="שורת מחץ על האופי"
-                          value={r.note}
-                          onChange={(v) => setRow(i, { note: v })}
-                          placeholder="המשפט שגורם למישהו להרים ראש"
-                          compact
-                          area
-                        />
+                        <div className="grid grid-cols-[1fr_88px] gap-2">
+                          <Field label="שם" value={r.name} onChange={(v) => setRow(i, { name: v })} placeholder="שם מלא" compact />
+                          <Field
+                            label="גיל"
+                            value={r.age}
+                            onChange={(v) => setRow(i, { age: v.replace(/[^0-9]/g, "").slice(0, 2) })}
+                            placeholder="26"
+                            type="tel"
+                            inputMode="numeric"
+                            compact
+                          />
+                        </div>
+                        <Field label="טלפון" value={r.phone} onChange={(v) => setRow(i, { phone: v })} placeholder="050-0000000" type="tel" dir="ltr" inputMode="numeric" compact />
+
+                        {CANDIDATE_QUESTIONS.map((q) => (
+                          <Field
+                            key={q.key}
+                            label={q.label}
+                            value={r[q.key]}
+                            onChange={(v) => setRow(i, { [q.key]: v })}
+                            placeholder={q.placeholder}
+                            compact
+                            area
+                          />
+                        ))}
                       </div>
                     </div>
                   ))}
                 </div>
 
+                <button
+                  onClick={addRow}
+                  className="mt-4 flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[#D9CBB8] py-3.5 text-[14px] font-bold text-[#844442] transition hover:border-[#844442] hover:bg-[#FBF7F1] active:scale-[0.99]"
+                >
+                  <Plus size={18} strokeWidth={2.6} /> מועמד/ת נוסף/ת
+                </button>
+
                 {err && <ErrorLine>{err}</ErrorLine>}
 
                 <PrimaryButton onClick={continueToPrep} busy={busy} disabled={filled === 0}>
-                  {filled === 0 ? "הזינו לפחות מועמד/ת אחד/ת" : `המשך לדף ההכנה (${filled})`}
+                  {filled === 0 ? "הזינו לפחות שם אחד" : `המשך לדף ההכנה (${filled})`}
                   {filled > 0 && <ArrowLeft size={17} />}
                 </PrimaryButton>
 
@@ -588,7 +630,7 @@ export default function AdamaEventPage() {
                     </span>
                     <h2 className="mt-4 text-[26px] font-bold text-[#3A2E26]">נרשמת. איזה כיף שאת/ה בא/ה.</h2>
                     <p className="mt-2 text-[15px] leading-relaxed text-[#7C6E60]">
-                      שמרנו לך מקום. {ev.dateLabel} · {ev.dateShort}, {ev.time}, {ev.mode === "place" ? ev.placeName || ev.place : ev.place}.
+                      שמרנו לך מקום. כל הפרטים מופיעים כאן למטה.
                     </p>
                     <p className="mt-1 text-[15px] leading-relaxed text-[#7C6E60]">
                       {filled > 0
@@ -597,54 +639,7 @@ export default function AdamaEventPage() {
                     </p>
                   </div>
 
-                  <div className="mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5">
-                    <Eyebrow icon={ev.mode === "place" ? MapPin : Video}>
-                      {ev.mode === "place" ? "איפה נפגשים" : "הכניסה למפגש"}
-                    </Eyebrow>
-
-                    {ev.mode === "place" ? (
-                      <>
-                        <p className="mt-2 text-[15px] font-bold leading-relaxed text-[#3A2E26]">
-                          {ev.placeName || ev.place}
-                        </p>
-                        {ev.address && ev.address !== (ev.placeName || ev.place) && (
-                          <p className="mt-0.5 text-[14px] leading-relaxed text-[#7C6E60]">{ev.address}</p>
-                        )}
-                        {ev.navUrl && (
-                          <a
-                            href={ev.navUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
-                          >
-                            <Navigation size={17} /> ניווט ב-Waze
-                          </a>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <p className="mt-2 text-[14px] leading-relaxed text-[#7C6E60]">
-                          המפגש מתקיים בזום. אפשר להיכנס מכאן ישירות, וכדאי לשמור את הקישור.
-                        </p>
-                        {ev.zoomUrl && (
-                          <a
-                            href={ev.zoomUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#62826B] py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_26px_-14px_rgba(98,130,107,0.9)] transition hover:bg-[#4E6B56] active:scale-95"
-                          >
-                            <Video size={17} /> כניסה לזום
-                          </a>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <div className="mt-5">
-                    <ActionButtons ev={ev} times={times} hideNav />
-                  </div>
-
-                  <BringNote ev={ev} />
+                  <EventDetails ev={ev} times={times} tone="inline" />
 
                   <button
                     onClick={handlePrint}
@@ -870,10 +865,10 @@ function ActionButtons({ ev, times, hideNav }) {
   };
 
   const base =
-    "flex items-center justify-center gap-1.5 rounded-2xl border px-3 py-3 text-[14px] font-bold transition active:scale-[0.97] min-h-[48px]";
+    "flex items-center justify-center gap-1.5 rounded-2xl border px-3 py-3 text-[14px] font-bold transition active:scale-[0.97] min-h-[50px]";
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-3 gap-2">
       {!hideNav && ev.navUrl && (
         <a
           href={ev.navUrl}
@@ -892,22 +887,66 @@ function ActionButtons({ ev, times, hideNav }) {
           <CalendarPlus size={16} /> הוסף ליומן
         </button>
       )}
+      <button
+        onClick={share}
+        className={`${base} border-[#D9CBB8] bg-white text-[#4A6552] hover:bg-[#EFF4EF]`}
+      >
+        <Share2 size={16} /> {shared ? "נפתח" : "שיתוף"}
+      </button>
+    </div>
+  );
+}
+
+// כל פרטי המפגש במקום אחד: מתי, איפה, מה להביא, וכפתורי הפעולה.
+// מופיע פעם אחת בכל מסך, כדי שלא יהיו שתי גרסאות של אותו מידע.
+function EventDetails({ ev, times, tone = "panel" }) {
+  const Wrapper = tone === "panel" ? Panel : "div";
+  const where = ev.mode === "place" ? ev.placeName || ev.place : ev.place;
+  const showAddress = ev.mode === "place" && ev.address && ev.address !== where;
+
+  return (
+    <Wrapper className={tone === "panel" ? undefined : "mt-6 rounded-3xl border border-[#E2D5C4] bg-[#FBF7F1] p-5"}>
+      <Eyebrow icon={CalendarDays}>פרטי המפגש</Eyebrow>
+
+      <dl className="mt-3 space-y-2.5">
+        <DetailRow icon={CalendarDays} label="מתי">
+          {ev.dateLabel} · {ev.dateShort}
+        </DetailRow>
+        <DetailRow icon={Clock} label="שעה">{ev.time}</DetailRow>
+        <DetailRow icon={ev.mode === "place" ? MapPin : Video} label="איפה">
+          {where}
+          {showAddress && <span className="block text-[13px] font-normal text-[#A2937F]">{ev.address}</span>}
+        </DetailRow>
+        {ev.bring && (
+          <DetailRow icon={Backpack} label="מה להביא">{ev.bring}</DetailRow>
+        )}
+      </dl>
+
+      <div className="mt-4">
+        <ActionButtons ev={ev} times={times} />
+      </div>
       {times && (
         <a
           href={googleCalendarUrl(ev, times)}
           target="_blank"
           rel="noopener noreferrer"
-          className={`${base} border-[#D9CBB8] bg-white text-[#844442] hover:bg-[#FBF7F1]`}
+          className="mt-2.5 block text-center text-[12.5px] font-semibold text-[#A2937F] underline underline-offset-2 transition hover:text-[#844442]"
         >
-          <CalendarDays size={16} /> יומן גוגל
+          או להוסיף ליומן גוגל
         </a>
       )}
-      <button
-        onClick={share}
-        className={`${base} border-[#D9CBB8] bg-white text-[#4A6552] hover:bg-[#EFF4EF]`}
-      >
-        <Share2 size={16} /> {shared ? "נפתח וואטסאפ" : "שתפו בוואטסאפ"}
-      </button>
+    </Wrapper>
+  );
+}
+
+function DetailRow({ icon: Icon, label, children }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <Icon size={16} className="mt-0.5 shrink-0 text-[#A8865A]" strokeWidth={2} />
+      <div className="min-w-0">
+        <dt className="text-[11.5px] font-bold uppercase tracking-[0.1em] text-[#A2937F]">{label}</dt>
+        <dd className="text-[15px] font-bold leading-relaxed text-[#3A2E26]">{children}</dd>
+      </div>
     </div>
   );
 }
@@ -1030,7 +1069,12 @@ function Hero({ ev, known, photosReady, times }) {
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-16 text-center">
+      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-12 text-center">
+        {/* הלוגו של אדמה. מצויר מיד, עוד לפני שפרטי המפגש ידועים. */}
+        <span className="mx-auto mb-6 flex h-[74px] w-[74px] items-center justify-center overflow-hidden rounded-[26px] bg-white/95 shadow-[0_14px_34px_-12px_rgba(20,14,10,0.8)] ring-1 ring-white/40">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={`${BASE}/icons/icon-192.png`} alt="אדמה" className="h-full w-full object-cover" />
+        </span>
 
         {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
             כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
@@ -1181,74 +1225,86 @@ function PrimaryButton({ onClick, busy, disabled, children, busyLabel }) {
 /* ───────────────────────── דף ההכנה להדפסה ───────────────────────── */
 
 function PrepSheet({ rows, owner, ev }) {
-  const list = rows.filter((r) => r.name.trim().length >= 2);
-  const shown = list.length ? list : [{ name: "", phone: "", note: "" }, { name: "", phone: "", note: "" }, { name: "", phone: "", note: "" }];
+  const list = (rows || []).filter(hasCandidate);
 
   return (
     <div className="ev-print" aria-hidden="true">
       <div className="ev-sheet">
         <div className="ev-head">
-          <div>
-            <p className="ev-brand">א ד מ ה</p>
-            <h1 className="ev-title">דף העבודה שלי · {ev.title}</h1>
+          <div className="ev-headline">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="ev-logo" src={`${BASE}/icons/icon-192.png`} alt="" />
+            <div>
+              <p className="ev-brand">אדמה · מאגר השידוכים לחוות גבעות</p>
+              <h1 className="ev-title">{ev.title}</h1>
+            </div>
           </div>
           <div className="ev-when">
-            <p>{ev.dateLabel}</p>
+            <p><b>{ev.dateLabel}</b></p>
             <p>{ev.dateShort} · {ev.time}</p>
-            <p>{ev.mode === "place" ? ev.placeName || ev.place : "בזום"}</p>
+            <p>{ev.mode === "place" ? ev.placeName || ev.place : ev.place}</p>
           </div>
         </div>
 
-        {owner?.name ? <p className="ev-owner">{owner.name}</p> : null}
-        {ev?.bring ? <p className="ev-bring">מה להביא: {ev.bring}</p> : null}
+        <div className="ev-meta">
+          {owner?.name ? <p><b>דף העבודה של</b> {owner.name}</p> : null}
+          {ev?.bring ? <p><b>מה להביא</b> {ev.bring}</p> : null}
+        </div>
 
-        <h2 className="ev-h2">איך מציגים מועמד ב־60 שניות?</h2>
+        <h2 className="ev-h2">איך מציגים מועמד/ת בדקה</h2>
         <ol className="ev-guide">
           {PITCH_GUIDE.map((g, i) => (
             <li key={g.t}>
               <span className="ev-num">{i + 1}</span>
-              <span>
-                <b>{g.t}.</b> {g.d}
-              </span>
+              <span><b>{g.t}.</b> {g.d}</span>
             </li>
           ))}
         </ol>
 
+        {/* דף קריא לכל מועמד/ת, שאלה־תשובה. לא טבלה. */}
         <h2 className="ev-h2">המועמדים שלי</h2>
-        <table className="ev-table">
-          <thead>
-            <tr>
-              <th style={{ width: "6%" }}>#</th>
-              <th style={{ width: "24%" }}>שם</th>
-              <th style={{ width: "20%" }}>טלפון</th>
-              <th>שורת המחץ</th>
-              <th style={{ width: "22%" }}>למי זה מתאים? (למילוי במפגש)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r, i) => (
-              <tr key={i}>
-                <td className="ev-c">{i + 1}</td>
-                <td>{r.name}</td>
-                <td dir="ltr" className="ev-ltr">{r.phone}</td>
-                <td>{r.note}</td>
-                <td />
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {list.length === 0 ? (
+          <p className="ev-empty">עוד לא הוזנו מועמדים. אפשר למלא ביד על הדף המודפס.</p>
+        ) : (
+          list.map((r, i) => (
+            <section key={i} className="ev-person">
+              <header className="ev-person-top">
+                <h3>
+                  <span className="ev-chip">{i + 1}</span>
+                  {r.name}
+                  {String(r.age || "").trim() ? <span className="ev-age">בן/בת {r.age}</span> : null}
+                </h3>
+                {String(r.phone || "").trim() ? (
+                  <span className="ev-phone" dir="ltr">{r.phone}</span>
+                ) : null}
+              </header>
+              <dl className="ev-qa">
+                {CANDIDATE_QUESTIONS.map((q) => {
+                  const value = String(r[q.key] || "").trim();
+                  return (
+                    <div key={q.key} className="ev-qa-row">
+                      <dt>{q.label}</dt>
+                      <dd>{value || <span className="ev-blank" />}</dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </section>
+          ))
+        )}
 
-        <h2 className="ev-h2">שמות שעלו במפגש</h2>
+        {/* טבלת התיאום - נפרדת לגמרי מתיאור המועמדים */}
+        <h2 className="ev-h2 ev-break">טבלת תיאום · מה סוכם במפגש</h2>
         <table className="ev-table">
           <thead>
             <tr>
-              <th style={{ width: "30%" }}>שם</th>
-              <th style={{ width: "24%" }}>מי הציג/ה</th>
-              <th>למה זה מדבר אליי</th>
+              <th style={{ width: "32%" }}>המשודך/ת שלי</th>
+              <th style={{ width: "32%" }}>המשודך/ת שלה</th>
+              <th>איש קשר לפניות</th>
             </tr>
           </thead>
           <tbody>
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
               <tr key={i}>
                 <td />
                 <td />
@@ -1293,9 +1349,55 @@ function PrintStyles() {
         display: flex; align-items: flex-end; justify-content: space-between;
         gap: 12px; border-bottom: 2.5px solid #844442; padding-bottom: 9px;
       }
-      .ev-brand { margin: 0; font-size: 9.5pt; font-weight: 700; letter-spacing: .3em; color: #A8865A; }
-      .ev-title { margin: 3px 0 0; font-size: 17pt; font-weight: 700; color: #844442; }
-      .ev-when { text-align: left; font-size: 9.5pt; line-height: 1.45; color: #6B5C50; }
+      .ev-headline { display: flex; align-items: center; gap: 10px; }
+      .ev-logo { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; }
+      .ev-brand { margin: 0; font-size: 8.5pt; font-weight: 700; letter-spacing: .08em; color: #A8865A; }
+      .ev-title { margin: 2px 0 0; font-size: 14pt; font-weight: 700; color: #844442; line-height: 1.2; }
+      .ev-meta { margin: 8px 0 0; font-size: 9.5pt; color: #4A3F37; }
+      .ev-meta p { margin: 0 0 2px; }
+      .ev-meta b { color: #844442; }
+      .ev-empty { font-size: 9.5pt; color: #8A7A6B; margin: 4px 0 0; }
+
+      /* דף המועמד/ת: שאלה ותשובה, אוורירי וקריא */
+      .ev-person {
+        break-inside: avoid; page-break-inside: avoid;
+        border: 1px solid #D9CBB8; border-radius: 8px;
+        padding: 9px 11px; margin-bottom: 9px; background: #FDFBF8;
+      }
+      .ev-person-top {
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 10px; border-bottom: 1px solid #E8DCCB; padding-bottom: 5px; margin-bottom: 6px;
+      }
+      .ev-person-top h3 {
+        margin: 0; font-size: 12.5pt; font-weight: 700; color: #3A2E26;
+        display: flex; align-items: baseline; gap: 7px;
+      }
+      .ev-chip {
+        display: inline-block; min-width: 17px; height: 17px; line-height: 17px;
+        border-radius: 999px; background: #844442; color: #fff;
+        font-size: 8pt; font-weight: 700; text-align: center;
+      }
+      .ev-age { font-size: 9.5pt; font-weight: 500; color: #7C6E60; }
+      .ev-phone { font-size: 10pt; font-weight: 700; color: #844442; direction: ltr; }
+      .ev-qa { margin: 0; }
+      .ev-qa-row { margin-bottom: 5px; break-inside: avoid; page-break-inside: avoid; }
+      .ev-qa dt {
+        font-size: 8.5pt; font-weight: 700; color: #A8865A; margin-bottom: 1px;
+      }
+      .ev-qa dd {
+        margin: 0; font-size: 10pt; line-height: 1.45; color: #2F261F;
+        white-space: pre-line;
+      }
+      .ev-blank {
+        display: block; border-bottom: 1px dotted #CCBDAB; height: 13px; width: 100%;
+      }
+      .ev-break { break-before: auto; page-break-before: auto; }
+      .ev-when {
+        text-align: left; font-size: 9.5pt; line-height: 1.5; color: #6B5C50;
+        flex: 0 0 auto; min-width: 150px;
+      }
+      .ev-when p:first-child, .ev-when p:nth-child(2) { white-space: nowrap; }
+      .ev-when b { color: #3A2E26; }
       .ev-when p { margin: 0; }
       .ev-owner { margin: 7px 0 0; font-size: 10.5pt; font-weight: 600; color: #3A2E26; }
       .ev-bring { margin: 3px 0 0; font-size: 9.5pt; color: #6B5C50; }
