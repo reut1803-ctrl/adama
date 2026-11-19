@@ -876,7 +876,9 @@ function ActionButtons({ ev, times, hideNav }) {
           rel="noopener noreferrer"
           className={`${base} border-[#4E6B56] bg-[#62826B] text-white hover:bg-[#4E6B56]`}
         >
-          <Navigation size={16} /> נווטו ב-Waze
+          {/* הכיתוב הולך אחרי הקישור עצמו: קישור וויז אומר וויז, וכל
+              קישור ניווט אחר (למשל נקודה ממפות גוגל) אומר ניווט. */}
+          <Navigation size={16} /> {/waze\.com/i.test(ev.navUrl) ? "נווטו ב-Waze" : "ניווט למקום"}
         </a>
       )}
       {times && (
