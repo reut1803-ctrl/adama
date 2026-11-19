@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, Check, Printer, Sparkles, Clock, Video, CalendarDays, Loader2, Plus, UserPlus, Heart,
-  MapPin, Navigation, CalendarPlus, Share2, Backpack,
+  MapPin, Navigation, CalendarPlus, Share2, Backpack, ChevronDown, ArrowDown,
 } from "lucide-react";
 import {
   EVENT, saveRsvp, saveLeads, PITCH_GUIDE, loadEventDetails, loadEventPhotos, resolveEvent, eventTimes,
@@ -67,6 +67,33 @@ const normalizeCandidate = (r) => ({
 });
 
 const hasCandidate = (r) => String(r?.name || "").trim().length >= 2;
+
+// ארבעת השלבים של הבוקר, לכרטיסים שנפתחים
+const MEETUP_STEPS = [
+  {
+    title: "באים מוכנים",
+    body: "עם דף ההכנה מודפס ועם שמות שחשבת עליהם מראש. לא מגיעים לחשוב — מגיעים להציע.",
+  },
+  {
+    title: "מספרים",
+    body: "כל אחד מציג את מי שהביא. לא קורות חיים: מה אנחנו מעריכים בו, מה כיף איתו, ומה הוא צריך מהצד השני.",
+  },
+  {
+    title: "מחברים",
+    body: "השמות נפגשים על השולחן. מה שנראה מתאים נרשם בטבלה, עם איש קשר לכל צד, כדי שיהיה למי לפנות.",
+  },
+  {
+    title: "ממשיכים מכאן",
+    body: "כל מה שיוצא מהבוקר הזה נכנס למאגר אדמה ואנחנו לוקחים את זה הלאה. זה לא נשאר על דף בתיק.",
+  },
+];
+
+const FOR_WHO = [
+  "למי שמכיר רווקים ורווקות בחוות ובגבעות",
+  "למי שכבר ניסה לשדך פעם, ונתקע באמצע",
+  "למי שיש לו שם בראש ולא יודע למי למסור אותו",
+  "למי שרוצה שגם החבר שלו יימצא",
+];
 
 /* ─────────── עזרי תוכן: טלפון, יומן, שיתוף, ספירה לאחור ─────────── */
 
@@ -261,6 +288,42 @@ export default function AdamaEventPage() {
 
   // מועדי המפגש, לספירה לאחור ולכפתורי היומן
   const times = useMemo(() => eventTimes(ev), [ev]);
+
+  // התמונות לקיר ולקטע הסגירה. מה שהועלה בלוח הבקרה קודם, ומה שחסר
+  // מושלם מהתמונות המובנות, כדי שהדף לעולם לא ייראה חצי ריק.
+  // החתימה נמדדת באורכי המחרוזות ולא בהן עצמן: הן עלולות להיות כבדות.
+  const photoSig = `${ev.heroImage ? ev.heroImage.length : 0}|${(ev.gallery || []).map((g) => g.length).join(",")}`;
+  const photoPool = useMemo(() => {
+    const uploaded = [ev.heroImage, ...(ev.gallery || [])].filter(Boolean);
+    const builtin = [img("shepherd.jpg"), img("flock.jpg"), img("work.jpg"), img("wedding.webp")];
+    return [...uploaded, ...builtin].slice(0, 6);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoSig]);
+  const mosaicPhotos = photoPool.slice(0, 6);
+  const closingPhoto = photoPool[photoPool.length - 1] || "";
+
+  const faqItems = useMemo(
+    () => [
+      {
+        q: "אני לא שדכן/ית. זה בכלל בשבילי?",
+        a: "בדיוק בשבילך. המפגש הוא לחברים שמכירים אנשים, לא לאנשי מקצוע. אם יש מישהו שאת/ה חושב/ת עליו — יש לך מה להביא.",
+      },
+      { q: "מה צריך להביא?", a: ev.bring },
+      {
+        q: "כמה זמן זה לוקח?",
+        a: `${ev.time}. אפשר להגיע ולצאת באמצע, אבל שווה להישאר עד הסוף — שם נסגרים החיבורים.`,
+      },
+      {
+        q: "ואם אין לי מישהו ספציפי בראש?",
+        a: "בוא/י בכל זאת. רוב השמות הטובים עולים דווקא תוך כדי, כששומעים על מישהו אחר.",
+      },
+      {
+        q: "מה קורה עם השמות אחרי המפגש?",
+        a: "כל מה שנאסף נכנס למאגר אדמה ואנחנו ממשיכים מכאן, בלי שזה נשאר על דף בתיק.",
+      },
+    ],
+    [ev.bring, ev.time]
+  );
 
   // עוגן לכפתור ההרשמה עצמו: הכפתור הדביק בנייד מגלגל אליו ונעלם
   // ברגע שהוא על המסך. נמדד הכפתור ולא הכרטיס כולו, כי כרטיס גבוה
@@ -501,12 +564,23 @@ export default function AdamaEventPage() {
   return (
     <div dir="rtl" className="ev-root min-h-screen bg-[#F5EFE6]">
       <PrintStyles />
+      <PremiumStyles />
 
       {/* ====================== המסך (מוסתר בהדפסה) ====================== */}
       <div className="ev-screen">
-        <Hero ev={ev} known={known} photosReady={photosReady} times={times} />
+        <Curtain />
+        <ScrollProgress />
+        <StickyBar ev={ev} show={ready && step === "rsvp" && !formVisible} onCta={scrollToForm} />
 
-        <main className="mx-auto w-full max-w-xl px-5 pb-24">
+        <Hero ev={ev} known={known} photosReady={photosReady} times={times} onCta={scrollToForm} />
+
+        {/* כרטיס ההרשמה עולה על שולי הירו. השכבות האלה הן מה שנותן
+            לדף את התחושה שהוא בנוי לעומק ולא נערם לאורך. */}
+        <main
+          className={`relative z-10 mx-auto -mt-16 w-full max-w-xl px-5 ${
+            step === "rsvp" ? "pb-10" : "pb-24"
+          }`}
+        >
           <div
             className="transition-all duration-300"
             style={{
@@ -769,6 +843,125 @@ export default function AdamaEventPage() {
             )}
           </div>
         </main>
+
+        {/* ===== מכאן ומטה: הסיפור. מופיע רק במסך ההרשמה, כדי שמי
+             שכבר באמצע המילוי לא יגלוש דרך דף שיווקי. ===== */}
+        {step === "rsvp" && (
+          <>
+            {/* כהה: המשפט שמחזיק את כל העניין, שורה אחרי שורה */}
+            <Band tone="deep">
+              <Lines
+                lines={["כל אחד מאיתנו", "מכיר מישהו."]}
+                gold={1}
+                className="text-center text-[34px] leading-[1.18]"
+              />
+              <Reveal delay={420}>
+                <p className="mx-auto mt-6 max-w-[32ch] text-center text-[16px] leading-[1.9] text-[#C9BBA9]">
+                  ורובם לא יגיעו לשום מאגר, לשום שדכנית ולשום טופס. הם יגיעו רק דרך
+                  מי שמכיר אותם באמת — ובוקר אחד בשנה, כולנו יושבים יחד ואומרים את
+                  השמות בקול.
+                </p>
+              </Reveal>
+              <Mosaic photos={mosaicPhotos} />
+            </Band>
+
+            {/* בהיר: מה באמת קורה שם, בכרטיסים שנפתחים */}
+            <Band tone="light">
+              <Reveal>
+                <p className="text-center text-[13px] font-bold tracking-[0.18em] text-[#C9A35B]">
+                  המפגש
+                </p>
+              </Reveal>
+              <Lines
+                lines={["מה קורה שם", "בשלוש שעות"]}
+                className="mt-3 text-center text-[30px] leading-[1.2] text-[#3A2E26]"
+              />
+              <ExpandCards items={MEETUP_STEPS} />
+            </Band>
+
+            {/* כהה: למי זה מתאים */}
+            <Band tone="dark">
+              <Lines
+                lines={["זה מפגש", "לחברים. לא למקצוענים."]}
+                gold={1}
+                className="text-[28px] leading-[1.25]"
+              />
+              <ul className="mt-8 space-y-3.5">
+                {FOR_WHO.map((line, i) => (
+                  <Reveal key={line} delay={i * 110}>
+                    <li className="flex items-start gap-3 text-[16px] leading-[1.7] text-[#E4D6C2]">
+                      <Check size={18} strokeWidth={2.6} className="mt-1 shrink-0 text-[#DEB86E]" />
+                      <span>{line}</span>
+                    </li>
+                  </Reveal>
+                ))}
+              </ul>
+            </Band>
+
+            {/* בהיר: שאלות ותשובות */}
+            <Band tone="light">
+              <Lines
+                lines={["שאלות ותשובות"]}
+                className="text-center text-[28px] leading-[1.2] text-[#3A2E26]"
+              />
+              <Faq items={faqItems} />
+            </Band>
+
+            {/* סגירה: תמונה מלאה, משפט אחד, וכפתור */}
+            <section className="relative overflow-hidden bg-[#1E1610]">
+              {closingPhoto && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={closingPhoto}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 h-full w-full object-cover opacity-45"
+                />
+              )}
+              <div
+                aria-hidden="true"
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, rgba(30,22,16,0.72) 0%, rgba(30,22,16,0.52) 50%, rgba(30,22,16,0.88) 100%)",
+                }}
+              />
+              <div className="relative mx-auto w-full max-w-xl px-5 py-20 text-center">
+                <Lines
+                  lines={["הבוקר הזה קורה פעם.", "בוא/י בשביל מישהו."]}
+                  gold={1}
+                  className="text-[30px] leading-[1.25] text-white"
+                />
+                <Reveal delay={360}>
+                  <p className="mx-auto mt-5 max-w-[30ch] text-[15.5px] leading-[1.8] text-[#C9BBA9]">
+                    {ev.dateLabel} · {ev.dateShort} · {ev.time}
+                    <br />
+                    {ev.place}
+                  </p>
+                </Reveal>
+                <Reveal delay={480}>
+                  <button
+                    onClick={scrollToForm}
+                    className="mt-8 inline-flex min-h-[54px] items-center justify-center gap-2 rounded-full bg-[#DEB86E] px-9 text-[17px] font-bold text-[#2A1F16] shadow-[0_18px_40px_-14px_rgba(222,184,110,0.6)] transition hover:bg-[#EBCB87] active:scale-[0.97]"
+                  >
+                    אני מגיע/ה <ArrowLeft size={18} strokeWidth={2.4} />
+                  </button>
+                </Reveal>
+                <Reveal delay={580}>
+                  <span className="mx-auto mt-10 flex w-fit flex-col items-center">
+                    <span
+                      className="text-[26px] font-bold leading-none text-[#DEB86E]"
+                      style={{ letterSpacing: "0.14em", paddingInlineStart: "0.14em" }}
+                    >
+                      אדמה
+                    </span>
+                    <span aria-hidden="true" className="mt-2 h-px w-10 bg-[#DEB86E]/60" />
+                  </span>
+                </Reveal>
+              </div>
+            </section>
+          </>
+        )}
       </div>
 
       {/* כפתור דביק בנייד: מופיע רק בשלב ההרשמה וכשהטופס אינו על המסך */}
@@ -799,7 +992,7 @@ export default function AdamaEventPage() {
 
 // הופעה רכה בגלילה. אם הדפדפן אינו תומך, או שהמשתמש ביקש להפחית
 // תנועה, התוכן פשוט מוצג - אף פעם לא נשאר מוסתר.
-function Reveal({ children, className = "" }) {
+function Reveal({ children, className = "", delay = 0 }) {
   const ref = useRef(null);
   const [shown, setShown] = useState(false);
 
@@ -825,8 +1018,12 @@ function Reveal({ children, className = "" }) {
   return (
     <div
       ref={ref}
-      className={`transition-all duration-500 ease-out ${className}`}
-      style={{ opacity: shown ? 1 : 0, transform: shown ? "none" : "translateY(14px)" }}
+      className={`transition-all duration-[650ms] ease-[cubic-bezier(.22,.61,.36,1)] ${className}`}
+      style={{
+        opacity: shown ? 1 : 0,
+        transform: shown ? "none" : "translateY(22px)",
+        transitionDelay: shown ? `${delay}ms` : "0ms",
+      }}
     >
       {children}
     </div>
@@ -981,7 +1178,7 @@ function BringNote({ ev }) {
   );
 }
 
-function Hero({ ev, known, photosReady, times }) {
+function Hero({ ev, known, photosReady, times, onCta }) {
   const PlaceIcon = ev.mode === "place" ? MapPin : Video;
 
   // כותרת ארוכה יורדת בגודל במקום להישבר לשורות דחוסות.
@@ -1054,10 +1251,14 @@ function Hero({ ev, known, photosReady, times }) {
     };
   }, []);
 
+  // גובה הירו נמדד ב-svh כדי שסרגל הכתובת בנייד לא יקפיץ אותו.
+  // דפדפן שאינו מכיר את היחידה פשוט נשאר עם vh שבמחלקה.
+  const tall = "min-h-[86vh]";
+
   return (
-    <header className="relative min-h-[54vh] overflow-hidden">
+    <header className={`relative ${tall} overflow-hidden bg-[#1E1610]`} style={{ minHeight: "86svh" }}>
       <div
-        className="absolute inset-0 bg-[#B5A590] will-change-transform"
+        className="absolute inset-0 bg-[#1E1610] will-change-transform"
         style={{ transform: `translate3d(0, ${shift}px, 0) scale(1.1)` }}
       >
         {slides.map((src, n) => (
@@ -1067,35 +1268,31 @@ function Hero({ ev, known, photosReady, times }) {
             src={src}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
+            className={`ev-ken absolute inset-0 h-full w-full object-cover transition-opacity duration-[1400ms] ease-in-out ${
+              n === current ? "ev-ken-on" : ""
+            }`}
             style={{ opacity: n === current ? 1 : 0 }}
           />
         ))}
-        {/* מעבר רך: כהה רק בראש, בשביל קריאוּת הכותרת, מתבהר על הרועה
-            והכבשים, ונמס אל צבע הרקע של הדף בתחתית */}
+        {/* שכבת קריאוּת: כהה בראש ובתחתית, פתוחה באמצע על התמונה עצמה,
+            ובסוף נמסה אל צבע הדף כדי שכרטיס ההרשמה ינחת עליה נקי */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              // שכבה אחת, אחידה: בלי פס כהה בראש הדף ובלי ערפל באמצע.
-              // ההכהיה שווה לאורך התמונה, והמעבר אל צבע הדף קצר ויושב
-              // רק בתחתית, כדי שהתמונה תיגמר נקי במקום להימרח.
-              "linear-gradient(to bottom, rgba(245,239,230,0) 80%, rgba(245,239,230,0.55) 92%, #F5EFE6 100%)," +
-              "linear-gradient(to bottom, rgba(42,32,26,0.46) 0%, rgba(42,32,26,0.44) 40%, rgba(42,32,26,0.32) 74%, rgba(42,32,26,0.24) 100%)",
+              "linear-gradient(to bottom, rgba(245,239,230,0) 86%, rgba(245,239,230,0.5) 95%, #F5EFE6 100%)," +
+              "linear-gradient(to bottom, rgba(26,18,12,0.62) 0%, rgba(26,18,12,0.34) 38%, rgba(26,18,12,0.40) 70%, rgba(26,18,12,0.66) 100%)",
           }}
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-xl px-5 pb-28 pt-12 text-center">
-        {/* הלוגו של אדמה, בזהב של העיצוב המודפס של המפגש.
-            מצויר מיד, עוד לפני שפרטי המפגש ידועים. */}
-        <span className="mx-auto mb-6 flex w-fit flex-col items-center">
+      <div className={`relative mx-auto flex ${tall} w-full max-w-xl flex-col items-center justify-center px-5 pb-24 pt-14 text-center`} style={{ minHeight: "86svh" }}>
+        {/* הלוגו של אדמה, בזהב של הפלייר המודפס */}
+        <span className="ev-rise mx-auto flex w-fit flex-col items-center" style={{ animationDelay: "120ms" }}>
           <span
             className="text-[34px] font-bold leading-none text-[#DEB86E]"
             style={{
               letterSpacing: "0.14em",
-              // הריווח בין האותיות מוסיף רווח אחרי האות האחרונה, ובעברית
-              // הוא נופל משמאל. ריפוד זהה מימין מחזיר את המילה למרכז.
               paddingInlineStart: "0.14em",
               textShadow: "0 2px 18px rgba(26,18,12,0.75), 0 1px 3px rgba(26,18,12,0.65)",
             }}
@@ -1105,53 +1302,46 @@ function Hero({ ev, known, photosReady, times }) {
           <span aria-hidden="true" className="mt-2.5 h-px w-14 bg-[#DEB86E]/70" />
         </span>
 
-        {/* עד שידועים פרטי האירוע האמיתיים לא מציירים כותרת ותגיות,
-            כדי שלא יופיע לרגע אירוע קודם ואז יוחלף מול העיניים */}
         <div
-          className="relative transition-opacity duration-300"
+          className="relative mt-7 w-full transition-opacity duration-500"
           style={{ opacity: known ? 1 : 0 }}
           aria-hidden={known ? undefined : "true"}
         >
-          {/* הצללה רכה מאחורי הטקסט בלבד. רדיאלית ובלי שוליים חדים,
-              ולכן היא לא נראית כקופסה ואינה מכהה את שאר התמונה. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 -top-8 bottom-[-18px] w-screen -translate-x-1/2"
-            style={{
-              background:
-                "radial-gradient(62% 80% at 50% 44%, rgba(30,23,18,0.52) 0%, rgba(30,23,18,0.38) 42%, rgba(30,23,18,0.16) 68%, rgba(30,23,18,0) 86%)",
-            }}
-          />
+          <h1
+            className={`ev-rise mx-auto max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
+            style={{ animationDelay: "240ms", textShadow: "0 2px 20px rgba(26,18,12,0.62), 0 1px 3px rgba(26,18,12,0.6)" }}
+          >
+            {ev.title}
+          </h1>
+          <p
+            className="ev-rise mx-auto mt-4 max-w-[34ch] text-balance text-[16px] font-medium leading-[1.75] text-[#F4E6D2]"
+            style={{ animationDelay: "380ms", textShadow: "0 2px 14px rgba(26,18,12,0.72)" }}
+          >
+            {ev.tagline}
+          </p>
 
-          <div className="relative">
-            <h1
-              className={`mx-auto max-w-[18ch] text-balance font-bold text-white ${titleSize}`}
-              style={{ textShadow: "0 2px 16px rgba(30,22,17,0.6), 0 1px 3px rgba(30,22,17,0.55)" }}
-            >
-              {ev.title}
-            </h1>
-            <p
-              className="mx-auto mt-3.5 max-w-[34ch] text-balance text-[16px] font-medium leading-[1.7] text-white"
-              style={{ textShadow: "0 2px 14px rgba(30,22,17,0.72), 0 1px 2px rgba(30,22,17,0.6)" }}
-            >
-              {ev.tagline}
-            </p>
+          <div className="ev-rise mx-auto mt-7 flex max-w-sm flex-wrap items-center justify-center gap-2" style={{ animationDelay: "500ms" }}>
+            <Pill icon={CalendarDays}>{ev.dateLabel} · {ev.dateShort}</Pill>
+            <Pill icon={Clock}>{ev.time}</Pill>
+            <Pill icon={PlaceIcon}>{ev.place}</Pill>
+          </div>
 
-            <div className="mx-auto mt-6 flex max-w-sm flex-wrap items-center justify-center gap-2">
-              <Pill icon={CalendarDays}>{ev.dateLabel} · {ev.dateShort}</Pill>
-              <Pill icon={Clock}>{ev.time}</Pill>
-              <Pill icon={PlaceIcon}>{ev.place}</Pill>
-            </div>
-
+          <div className="ev-rise" style={{ animationDelay: "600ms" }}>
             <Countdown times={times} />
           </div>
 
+          <button
+            onClick={onCta}
+            className="ev-rise mt-8 inline-flex min-h-[54px] items-center justify-center gap-2 rounded-full bg-[#DEB86E] px-9 text-[17px] font-bold text-[#2A1F16] shadow-[0_18px_40px_-14px_rgba(222,184,110,0.7)] transition hover:bg-[#EBCB87] active:scale-[0.97]"
+            style={{ animationDelay: "700ms" }}
+          >
+            אני מגיע/ה <ArrowLeft size={18} strokeWidth={2.4} />
+          </button>
         </div>
 
-        {/* שורת הנקודות שומרת על גובה קבוע גם לפני שהיא מופיעה,
-            כדי ששום דבר מתחתיה לא יזוז כשהיא נכנסת */}
+        {/* נקודות הקרוסלה. שומרות על גובה קבוע גם לפני שהן מופיעות */}
         <div
-          className="mx-auto mt-7 flex h-2 items-center justify-center gap-2 transition-opacity duration-300"
+          className="mx-auto mt-8 flex h-2 items-center justify-center gap-2 transition-opacity duration-300"
           style={{ opacity: known && slides.length > 1 ? 1 : 0 }}
           aria-hidden={known && slides.length > 1 ? undefined : "true"}
         >
@@ -1161,14 +1351,291 @@ function Hero({ ev, known, photosReady, times }) {
                 key={n}
                 onClick={() => setSlide(n)}
                 aria-label={`תמונה ${n + 1}`}
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  n === current ? "w-7 bg-white" : "w-2 bg-white/45 hover:bg-white/70"
+                className={`h-2 rounded-full transition-all duration-500 ${
+                  n === current ? "w-7 bg-[#DEB86E]" : "w-2 bg-white/45 hover:bg-white/70"
                 }`}
               />
             ))}
         </div>
+
+        {/* רמז גלילה. נעלם ברגע שזזים, כדי שלא ירדוף אחרי העין */}
+        <span
+          aria-hidden="true"
+          className="ev-cue pointer-events-none absolute bottom-7 left-1/2 -translate-x-1/2 text-[#DEB86E]/80 transition-opacity duration-300"
+          style={{ opacity: shift > 6 ? 0 : 1 }}
+        >
+          <ArrowDown size={20} strokeWidth={2.2} />
+        </span>
       </div>
     </header>
+  );
+}
+
+/* ═══════════════ השכבה החדשה: קצב, שכבות ותנועה ═══════════════ */
+
+// מסך פתיחה. נפתח על כהה עם הלוגו בלבד ונמס אל הדף, בדיוק כמו
+// בסרטון ההשראה. כולו CSS: גם אם שום קוד לא ירוץ הוא ייעלם לבד,
+// ולכן הוא לא יכול להשאיר את הדף חסום.
+function Curtain() {
+  return (
+    <div className="ev-curtain pointer-events-none fixed inset-0 z-[60] flex items-center justify-center bg-[#1E1610]">
+      <span
+        className="text-[38px] font-bold leading-none text-[#DEB86E]"
+        style={{ letterSpacing: "0.16em", paddingInlineStart: "0.16em" }}
+      >
+        אדמה
+      </span>
+    </div>
+  );
+}
+
+// קו התקדמות דק בראש הדף
+function ScrollProgress() {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const h = document.documentElement.scrollHeight - window.innerHeight;
+        setP(h > 0 ? Math.min(1, window.scrollY / h) : 0);
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+  return (
+    <div aria-hidden="true" className="ev-sticky pointer-events-none fixed inset-x-0 top-0 z-50 h-[3px]">
+      <div
+        className="h-full origin-right bg-[#DEB86E] transition-transform duration-150 ease-out"
+        style={{ transform: `scaleX(${p})` }}
+      />
+    </div>
+  );
+}
+
+// סרגל עליון שנכנס אחרי הירו: הלוגו, התאריך, וכפתור הרשמה תמיד בהישג יד
+function StickyBar({ ev, show, onCta }) {
+  return (
+    <div
+      className="ev-sticky fixed inset-x-0 top-0 z-40 border-b border-[#DEB86E]/20 bg-[#1E1610]/90 backdrop-blur-md transition-all duration-300"
+      style={{ opacity: show ? 1 : 0, transform: show ? "none" : "translateY(-100%)" }}
+      aria-hidden={show ? undefined : "true"}
+    >
+      <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3 px-4 py-2.5">
+        <span className="flex items-baseline gap-2.5 overflow-hidden">
+          <span className="text-[17px] font-bold leading-none text-[#DEB86E]" style={{ letterSpacing: "0.1em" }}>
+            אדמה
+          </span>
+          <span className="truncate text-[12px] font-semibold text-[#C9BBA9]">
+            {ev.dateShort} · {ev.time}
+          </span>
+        </span>
+        <button
+          onClick={onCta}
+          tabIndex={show ? 0 : -1}
+          className="hidden shrink-0 rounded-full bg-[#DEB86E] px-4 py-2 text-[13px] font-bold text-[#2A1F16] transition active:scale-95 sm:inline-flex"
+        >
+          אני מגיע/ה
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// פס רוחב מלא. זה הקצב של הדף: בהיר, כהה, בהיר - כמו בסרטון.
+function Band({ tone = "dark", children, className = "" }) {
+  const skin =
+    tone === "dark"
+      ? "bg-[#241B14] text-[#F4E6D2]"
+      : tone === "deep"
+      ? "bg-[#1E1610] text-[#F4E6D2]"
+      : "bg-[#F5EFE6] text-[#3A2E26]";
+  return (
+    <section className={`relative overflow-hidden ${skin} ${className}`}>
+      <div className="mx-auto w-full max-w-xl px-5 py-16">{children}</div>
+    </section>
+  );
+}
+
+// כותרת שנחשפת שורה אחרי שורה
+function Lines({ lines, className = "", gold = -1 }) {
+  return (
+    <h2 className={`font-bold ${className}`}>
+      {lines.map((line, i) => (
+        <Reveal key={i} delay={i * 160}>
+          <span className={`block ${i === gold ? "text-[#DEB86E]" : ""}`}>{line}</span>
+        </Reveal>
+      ))}
+    </h2>
+  );
+}
+
+// תמונה בקשת, עם מסגרת זהב דקה - הצורה מהפלייר המודפס
+function ArchPhoto({ src, className = "", style }) {
+  if (!src) return null;
+  return (
+    <span
+      className={`block overflow-hidden rounded-t-full ring-1 ring-[#DEB86E]/45 ${className}`}
+      style={style}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+    </span>
+  );
+}
+
+// קיר התמונות. נע לאט יותר מהדף, ולכן נותן עומק בלי לגזול תשומת לב.
+function Mosaic({ photos }) {
+  const [shift, setShift] = useState(0);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    let reduced = false;
+    try {
+      reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {}
+    if (reduced) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const el = ref.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const mid = (r.top + r.height / 2 - window.innerHeight / 2) / window.innerHeight;
+        setShift(Math.max(-26, Math.min(26, -mid * 34)));
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  if (!photos.length) return null;
+  // שלוש עמודות, וכל עמודה זזה בקצב משלה
+  const cols = [[], [], []];
+  photos.forEach((src, i) => cols[i % 3].push(src));
+
+  return (
+    <div ref={ref} className="mt-10 grid grid-cols-3 gap-2.5" aria-hidden="true">
+      {cols.map((col, c) => (
+        <div
+          key={c}
+          className="flex flex-col gap-2.5 will-change-transform"
+          style={{ transform: `translate3d(0, ${shift * (c === 1 ? -1 : 1) * (c === 2 ? 0.6 : 1)}px, 0)` }}
+        >
+          {col.map((src, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={src}
+              alt=""
+              className="h-28 w-full rounded-2xl object-cover ring-1 ring-[#DEB86E]/20"
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// הכרטיסים שנפתחים. זה הרגע שעושה "וואו" בסרטון: כרטיס אחד פתוח
+// בכל רגע, והמעבר ביניהם רך. בלי ספרייה - רק גובה שנפתח ב-CSS.
+function ExpandCards({ items }) {
+  const [open, setOpen] = useState(0);
+  return (
+    <div className="mt-9 space-y-3">
+      {items.map((it, i) => {
+        const isOpen = open === i;
+        return (
+          <Reveal key={it.title} delay={i * 110}>
+            <button
+              onClick={() => setOpen(isOpen ? -1 : i)}
+              aria-expanded={isOpen}
+              className={`w-full overflow-hidden rounded-3xl border text-right transition-all duration-500 ${
+                isOpen
+                  ? "border-[#DEB86E]/60 bg-[#2E231A]"
+                  : "border-[#DEB86E]/15 bg-[#241B14] hover:border-[#DEB86E]/35"
+              }`}
+            >
+              <span className="flex items-center gap-3 px-5 py-4">
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold transition-colors duration-300 ${
+                    isOpen ? "bg-[#DEB86E] text-[#2A1F16]" : "bg-[#DEB86E]/15 text-[#DEB86E]"
+                  }`}
+                >
+                  {i + 1}
+                </span>
+                <span className="flex-1 text-[17px] font-bold text-[#F4E6D2]">{it.title}</span>
+                <ChevronDown
+                  size={18}
+                  className={`shrink-0 text-[#DEB86E] transition-transform duration-500 ${isOpen ? "rotate-180" : ""}`}
+                />
+              </span>
+              <span
+                className="grid transition-all duration-500 ease-[cubic-bezier(.22,.61,.36,1)]"
+                style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+              >
+                <span className="overflow-hidden">
+                  <span className="block px-5 pb-5 pr-16 text-[15px] leading-[1.8] text-[#C9BBA9]">
+                    {it.body}
+                  </span>
+                </span>
+              </span>
+            </button>
+          </Reveal>
+        );
+      })}
+    </div>
+  );
+}
+
+// שאלות ותשובות
+function Faq({ items }) {
+  const [open, setOpen] = useState(-1);
+  return (
+    <div className="mt-8 space-y-2.5">
+      {items.map((it, i) => {
+        const isOpen = open === i;
+        return (
+          <Reveal key={it.q} delay={i * 90}>
+            <button
+              onClick={() => setOpen(isOpen ? -1 : i)}
+              aria-expanded={isOpen}
+              className={`w-full overflow-hidden rounded-2xl border text-right transition-colors duration-300 ${
+                isOpen ? "border-[#C9A35B] bg-white" : "border-[#E2D5C4] bg-white/70 hover:border-[#C9A35B]/60"
+              }`}
+            >
+              <span className="flex items-center gap-2.5 px-4 py-3.5">
+                <span className="flex-1 text-[15px] font-bold text-[#3A2E26]">{it.q}</span>
+                <ChevronDown
+                  size={17}
+                  className={`shrink-0 text-[#A2937F] transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
+                />
+              </span>
+              <span
+                className="grid transition-all duration-400 ease-out"
+                style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+              >
+                <span className="overflow-hidden">
+                  <span className="block px-4 pb-4 text-[14.5px] leading-[1.8] text-[#7C6E60]">{it.a}</span>
+                </span>
+              </span>
+            </button>
+          </Reveal>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1352,6 +1819,61 @@ function PrepSheet({ rows, owner, ev }) {
 /* ───────────────────────── עיצוב ההדפסה ─────────────────────────
    כל הכללים מקוננים תחת .ev-root, ולכן הם חלים אך ורק על הדף הזה
    ואינם יכולים להשפיע על שום מסך אחר במערכת. */
+
+
+// התנועה של הדף. הכול CSS טהור: אין כאן שום ספריית אנימציה, ולכן
+// אין מה שיתקע את הטעינה בנייד ואין גרם אחד של קוד נוסף להוריד.
+// כל כלל יושב תחת ev-root, ולכן אינו יכול לדלוף לשום מסך אחר.
+function PremiumStyles() {
+  return (
+    <style jsx global>{`
+      @keyframes evRise {
+        from { opacity: 0; transform: translate3d(0, 20px, 0); }
+        to   { opacity: 1; transform: none; }
+      }
+      @keyframes evCurtain {
+        from { opacity: 1; }
+        99%  { opacity: 0; visibility: visible; }
+        to   { opacity: 0; visibility: hidden; }
+      }
+      @keyframes evKen {
+        from { transform: scale(1); }
+        to   { transform: scale(1.09); }
+      }
+      @keyframes evCue {
+        0%, 100% { transform: translate(-50%, 0); }
+        50%      { transform: translate(-50%, 7px); }
+      }
+
+      .ev-root .ev-rise {
+        animation: evRise 760ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+      .ev-root .ev-curtain {
+        /* קצר בכוונה: אנשים מגיעים לכאן מקישור בוואטסאפ כדי להירשם,
+           ומסך פתיחה ארוך הוא המתנה, לא רושם. */
+        animation: evCurtain 620ms cubic-bezier(0.4, 0, 0.2, 1) 160ms both;
+      }
+      /* הזום האיטי רץ רק על התמונה שנראית כרגע, ולכן אין עבודה מיותרת
+         על תמונות שממילא שקופות */
+      .ev-root .ev-ken-on {
+        animation: evKen 9000ms ease-out both;
+      }
+      .ev-root .ev-cue {
+        animation: evCue 2200ms ease-in-out infinite;
+      }
+
+      /* מי שביקש במכשיר שלו להפחית תנועה מקבל דף שקט לגמרי.
+         שימו לב: וילון הפתיחה נעלם כאן לגמרי ולא רק מפסיק לזוז,
+         אחרת הוא היה נשאר פרוש על המסך. */
+      @media (prefers-reduced-motion: reduce) {
+        .ev-root .ev-curtain { display: none; }
+        .ev-root .ev-rise,
+        .ev-root .ev-ken-on,
+        .ev-root .ev-cue { animation: none; }
+      }
+    `}</style>
+  );
+}
 
 function PrintStyles() {
   return (
