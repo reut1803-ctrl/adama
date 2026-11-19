@@ -162,10 +162,16 @@ const storageKey = (ev) => `${STORAGE_PREFIX}${ev?.id || EVENT.id}`;
 // את המסך. המפתח בכוונה בלי נקודתיים, כדי שניקוי האירועים לא ימחק אותו.
 const CACHE_KEY = "adama-last-event";
 
+// גרסת העותק המקומי. העותק הוא תוצאה מוגמרת של מיזוג ההגדרות, ולכן
+// כשהקוד משנה את האופן שבו פרטי המפגש נגזרים מהן, עותק שנשמר בגרסה
+// קודמת יצייר לרגע טקסט ישן לפני שהרשת מתקנת אותו. המספר הזה עולה
+// יחד עם שינוי כזה, וכל עותק ישן נפסל מיד בכל המכשירים.
+const CACHE_VERSION = 2;
+
 function readCache() {
   try {
     const c = JSON.parse(window.localStorage.getItem(CACHE_KEY) || "null");
-    return c && typeof c === "object" && c.id ? c : null;
+    return c && typeof c === "object" && c.id && c.v === CACHE_VERSION ? c : null;
   } catch {
     return null;
   }
@@ -174,10 +180,11 @@ function readCache() {
 function writeCache(ev) {
   // שלוש רמות, מהשלמה לדלילה. חשוב שהתמונה הראשית תישמר גם כשאין מקום
   // לכולן: היא זו שמצוירת ראשונה בביקור הבא.
+  const stamped = { ...ev, v: CACHE_VERSION };
   const tries = [
-    ev,
-    { ...ev, gallery: [] },
-    { ...ev, heroImage: "", gallery: [] },
+    stamped,
+    { ...stamped, gallery: [] },
+    { ...stamped, heroImage: "", gallery: [] },
   ];
   for (const attempt of tries) {
     try {
